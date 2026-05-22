@@ -1,5 +1,5 @@
 node_modules/
-dist/
+# dist/ — included for ClawHub publish
 *.db
 *.db-wal
 *.db-shm
