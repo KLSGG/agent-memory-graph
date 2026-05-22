@@ -7,6 +7,7 @@ export interface Entity {
     updated_at: string;
     source?: string;
     confidence: number;
+    mention_count?: number;
 }
 export interface Relationship {
     id: string;

@@ -51,13 +51,24 @@ function autoDedup(engine) {
   return mergeCount;
 }
 function nameSimilarity(a, b) {
-  const na = a.toLowerCase().trim();
-  const nb = b.toLowerCase().trim();
+  const na = stripTitles(a.toLowerCase().trim());
+  const nb = stripTitles(b.toLowerCase().trim());
   if (na === nb) return 1;
   if (na.includes(nb) || nb.includes(na)) return 0.9;
+  const rawA = a.toLowerCase().trim();
+  const rawB = b.toLowerCase().trim();
+  if (rawA !== na || rawB !== nb) {
+    if (na === nb) return 1;
+    if (na.includes(nb) || nb.includes(na)) return 0.92;
+  }
   const dist = levenshtein(na, nb);
   const maxLen = Math.max(na.length, nb.length);
   return maxLen === 0 ? 1 : 1 - dist / maxLen;
+}
+function stripTitles(name) {
+  const prefixes = /^(dr\.?|prof\.?|professor|mr\.?|mrs\.?|ms\.?|sir|lord|sếp|anh|chị|em)\s+/i;
+  const suffixes = /\s+(inc\.?|corp\.?|ltd\.?|llc|co\.?|company|corporation|motors|labs|laboratory|laboratories|university|univ\.?)$/i;
+  return name.replace(prefixes, "").replace(suffixes, "").trim();
 }
 function levenshtein(a, b) {
   const m = a.length;

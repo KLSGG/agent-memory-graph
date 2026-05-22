@@ -11,6 +11,7 @@ export interface Entity {
   updated_at: string;
   source?: string;
   confidence: number;
+  mention_count?: number;
 }
 
 export interface Relationship {
@@ -431,6 +432,7 @@ export class GraphEngine {
       updated_at: row.updated_at,
       source: row.source ?? undefined,
       confidence: row.confidence,
+      mention_count: row.mention_count ?? 1,
     };
   }
 

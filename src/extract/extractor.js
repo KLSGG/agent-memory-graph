@@ -130,7 +130,8 @@ async function extractFromText(text, config) {
       to: String(r.to).trim(),
       fromType: r.fromType?.trim(),
       toType: r.toType?.trim(),
-      confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8))
+      confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8)),
+      when: r.when ? String(r.when).trim() : void 0
     }));
     return { entities, relationships };
   } catch (err) {

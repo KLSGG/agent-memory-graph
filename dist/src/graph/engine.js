@@ -294,6 +294,7 @@ export class GraphEngine {
             updated_at: row.updated_at,
             source: row.source ?? undefined,
             confidence: row.confidence,
+            mention_count: row.mention_count ?? 1,
         };
     }
     rowToRelationship(row) {

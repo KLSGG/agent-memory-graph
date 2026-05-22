@@ -295,7 +295,8 @@ class GraphEngine {
       created_at: row.created_at,
       updated_at: row.updated_at,
       source: row.source ?? void 0,
-      confidence: row.confidence
+      confidence: row.confidence,
+      mention_count: row.mention_count ?? 1
     };
   }
   rowToRelationship(row) {

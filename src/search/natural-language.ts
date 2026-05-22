@@ -548,7 +548,7 @@ async function queryAboutEntity(
   const incoming = engine.getRelationsTo(entity.id);
 
   const lines: string[] = [
-    `${entity.name} (${entity.type})`,
+    `${entity.name} (${entity.type})${entity.mention_count && entity.mention_count > 1 ? ` [mentions: ${entity.mention_count}]` : ''}`,
   ];
 
   if (Object.keys(entity.properties).length > 0) {

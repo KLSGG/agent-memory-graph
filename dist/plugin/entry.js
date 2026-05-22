@@ -441,7 +441,8 @@ var init_engine = __esm({
           created_at: row.created_at,
           updated_at: row.updated_at,
           source: row.source ?? void 0,
-          confidence: row.confidence
+          confidence: row.confidence,
+          mention_count: row.mention_count ?? 1
         };
       }
       rowToRelationship(row) {
@@ -670,7 +671,8 @@ async function extractFromText(text, config) {
       to: String(r.to).trim(),
       fromType: r.fromType?.trim(),
       toType: r.toType?.trim(),
-      confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8))
+      confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8)),
+      when: r.when ? String(r.when).trim() : void 0
     }));
     return { entities, relationships };
   } catch (err) {
@@ -1048,7 +1050,7 @@ async function queryAboutEntity(engine, entityName, config) {
   const outgoing = engine.getRelationsFrom(entity.id);
   const incoming = engine.getRelationsTo(entity.id);
   const lines = [
-    `${entity.name} (${entity.type})`
+    `${entity.name} (${entity.type})${entity.mention_count && entity.mention_count > 1 ? ` [mentions: ${entity.mention_count}]` : ""}`
   ];
   if (Object.keys(entity.properties).length > 0) {
     lines.push(`Properties: ${JSON.stringify(entity.properties)}`);
@@ -1320,13 +1322,24 @@ function autoDedup(engine) {
   return mergeCount;
 }
 function nameSimilarity(a, b) {
-  const na = a.toLowerCase().trim();
-  const nb = b.toLowerCase().trim();
+  const na = stripTitles(a.toLowerCase().trim());
+  const nb = stripTitles(b.toLowerCase().trim());
   if (na === nb) return 1;
   if (na.includes(nb) || nb.includes(na)) return 0.9;
+  const rawA = a.toLowerCase().trim();
+  const rawB = b.toLowerCase().trim();
+  if (rawA !== na || rawB !== nb) {
+    if (na === nb) return 1;
+    if (na.includes(nb) || nb.includes(na)) return 0.92;
+  }
   const dist = levenshtein(na, nb);
   const maxLen = Math.max(na.length, nb.length);
   return maxLen === 0 ? 1 : 1 - dist / maxLen;
+}
+function stripTitles(name) {
+  const prefixes = /^(dr\.?|prof\.?|professor|mr\.?|mrs\.?|ms\.?|sir|lord|sếp|anh|chị|em)\s+/i;
+  const suffixes = /\s+(inc\.?|corp\.?|ltd\.?|llc|co\.?|company|corporation|motors|labs|laboratory|laboratories|university|univ\.?)$/i;
+  return name.replace(prefixes, "").replace(suffixes, "").trim();
 }
 function levenshtein(a, b) {
   const m = a.length;

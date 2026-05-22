@@ -155,6 +155,7 @@ export async function extractFromText(text, config) {
             fromType: r.fromType?.trim(),
             toType: r.toType?.trim(),
             confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8)),
+            when: r.when ? String(r.when).trim() : undefined,
         }));
         return { entities, relationships };
     }

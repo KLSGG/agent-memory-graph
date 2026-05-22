@@ -343,7 +343,7 @@ async function queryAboutEntity(engine, entityName, config) {
   const outgoing = engine.getRelationsFrom(entity.id);
   const incoming = engine.getRelationsTo(entity.id);
   const lines = [
-    `${entity.name} (${entity.type})`
+    `${entity.name} (${entity.type})${entity.mention_count && entity.mention_count > 1 ? ` [mentions: ${entity.mention_count}]` : ""}`
   ];
   if (Object.keys(entity.properties).length > 0) {
     lines.push(`Properties: ${JSON.stringify(entity.properties)}`);

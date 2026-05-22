@@ -102,20 +102,39 @@ export function autoDedup(engine: GraphEngine): number {
 
 /**
  * Simple name similarity using normalized Levenshtein distance.
+ * Also handles title/prefix stripping for better matching.
  */
 function nameSimilarity(a: string, b: string): number {
-  const na = a.toLowerCase().trim();
-  const nb = b.toLowerCase().trim();
+  const na = stripTitles(a.toLowerCase().trim());
+  const nb = stripTitles(b.toLowerCase().trim());
 
   if (na === nb) return 1.0;
 
   // Check if one contains the other
   if (na.includes(nb) || nb.includes(na)) return 0.9;
 
+  // Check if stripped versions match but originals don't
+  const rawA = a.toLowerCase().trim();
+  const rawB = b.toLowerCase().trim();
+  if (rawA !== na || rawB !== nb) {
+    // Titles were stripped — compare stripped versions
+    if (na === nb) return 1.0;
+    if (na.includes(nb) || nb.includes(na)) return 0.92;
+  }
+
   // Levenshtein distance
   const dist = levenshtein(na, nb);
   const maxLen = Math.max(na.length, nb.length);
   return maxLen === 0 ? 1.0 : 1.0 - dist / maxLen;
+}
+
+/**
+ * Strip common titles/prefixes/suffixes for better entity matching.
+ */
+function stripTitles(name: string): string {
+  const prefixes = /^(dr\.?|prof\.?|professor|mr\.?|mrs\.?|ms\.?|sir|lord|sếp|anh|chị|em)\s+/i;
+  const suffixes = /\s+(inc\.?|corp\.?|ltd\.?|llc|co\.?|company|corporation|motors|labs|laboratory|laboratories|university|univ\.?)$/i;
+  return name.replace(prefixes, '').replace(suffixes, '').trim();
 }
 
 function levenshtein(a: string, b: string): number {
