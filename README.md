@@ -57,6 +57,14 @@ You: "How is Viktor connected to Rust?"
 
 ---
 
+## 📋 Requirements
+
+- **Node.js 18–22** (recommended) — `better-sqlite3` has prebuilt binaries
+- **Node.js 24** — works but requires build tools (`gcc`, `make`, `python3`) for native compilation
+- **Any OpenAI-compatible LLM** — for entity extraction (optional for manual operations)
+
+---
+
 ## 🚀 Quick Start
 
 ```bash
