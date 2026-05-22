@@ -3,7 +3,13 @@
   "name": "Memory Graph",
   "description": "Auto-builds a knowledge graph from conversations. Extracts entities and relationships from every message, stores in local SQLite, and exposes query/search/path tools to the agent.",
   "contracts": {
-    "tools": ["memory_graph_query", "memory_graph_ingest", "memory_graph_search", "memory_graph_path", "memory_graph_stats"]
+    "tools": [
+      "memory_graph_query",
+      "memory_graph_ingest",
+      "memory_graph_search",
+      "memory_graph_path",
+      "memory_graph_stats"
+    ]
   },
   "activation": {
     "onStartup": true
@@ -42,14 +48,43 @@
         "items": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
-            "entityHints": { "type": "array", "items": { "type": "string" } },
-            "relationHints": { "type": "array", "items": { "type": "string" } }
+            "name": {
+              "type": "string"
+            },
+            "entityHints": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "relationHints": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           }
         },
         "default": []
       }
     },
     "additionalProperties": false
-  }
+  },
+  "build": {
+    "openclawVersion": ">=2026.3.24",
+    "entry": "dist/plugin/entry.js"
+  },
+  "version": "0.1.1",
+  "author": "KLSGG",
+  "repository": "https://github.com/KLSGG/agent-memory-graph",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "knowledge-graph",
+    "entities",
+    "relationships",
+    "sqlite",
+    "llm",
+    "auto-ingest"
+  ]
 }
