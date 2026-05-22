@@ -1,0 +1,22 @@
+graph LR
+    classDef person fill:#3b82f6,stroke:#1d4ed8,color:#fff
+    classDef company fill:#f97316,stroke:#c2410c,color:#fff
+    classDef project fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    classDef tool fill:#10b981,stroke:#047857,color:#fff
+    classDef language fill:#06b6d4,stroke:#0e7490,color:#fff
+
+    Alice[Alice<br/>CTO]:::person
+    Bob[Bob<br/>Engineer]:::person
+    TechCorp[TechCorp]:::company
+    Platform[Platform Team]:::project
+    K8s[Kubernetes]:::tool
+    Go[Go]:::language
+    PG[PostgreSQL]:::tool
+
+    Alice -->|CTO_OF| TechCorp
+    Alice -->|LEADS| Platform
+    Alice -->|USES| K8s
+    Alice -->|USES| Go
+    Alice -->|USES| PG
+    Bob -->|MEMBER_OF| Platform
+    Bob -->|WORKS_AT| TechCorp

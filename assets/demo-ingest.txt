@@ -1,0 +1,21 @@
+$ memory-graph ingest "Alice is the CTO of TechCorp. She leads the Platform team 
+  and uses Kubernetes, Go, and PostgreSQL. Bob is a senior engineer on her team 
+  who specializes in distributed systems."
+
+✓ Extracted 7 entities and 8 relationships
+
+  Entities:
+  ├── Alice (Person) — CTO
+  ├── Bob (Person) — Senior Engineer
+  ├── TechCorp (Company)
+  ├── Platform team (Team)
+  ├── Kubernetes (Tool)
+  ├── Go (Language)
+  └── PostgreSQL (Database)
+
+  Relationships:
+  ├── Alice ──[CTO_OF]──→ TechCorp
+  ├── Alice ──[LEADS]──→ Platform team
+  ├── Alice ──[USES]──→ Kubernetes, Go, PostgreSQL
+  ├── Bob ──[MEMBER_OF]──→ Platform team
+  └── Bob ──[SPECIALIZES_IN]──→ Distributed Systems

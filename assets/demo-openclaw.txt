@@ -1,0 +1,20 @@
+# OpenClaw Plugin — Auto-detect in action
+
+[19:02] User: Hey, I just met Viktor who's the CTO of Nexus Labs. 
+       They're building SkyNet-X using Rust and ROS2.
+
+       ┌─ memory-graph hook ─────────────────────────┐
+       │ ✓ Auto-ingested: 4 entities, 5 relationships │
+       │   Viktor (Person), Nexus Labs (Company),      │
+       │   SkyNet-X (Project), Rust (Language)         │
+       └───────────────────────────────────────────────┘
+
+[19:05] User: Who works at Nexus Labs?
+
+       Agent calls: memory_graph_query("Who works at Nexus Labs?")
+       → "People at Nexus Labs: Viktor"
+
+[19:06] User: What is Viktor working on?
+
+       Agent calls: memory_graph_query("What is Viktor working on?")
+       → "Viktor: WORKS_ON → SkyNet-X, CTO_OF → Nexus Labs"

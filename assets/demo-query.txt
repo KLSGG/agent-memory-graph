@@ -1,0 +1,19 @@
+$ memory-graph ask "What does Alice use?"
+
+  Alice (Person)
+  ├── USES → Kubernetes (Tool)
+  ├── USES → Go (Language)
+  └── USES → PostgreSQL (Database)
+
+$ memory-graph ask "Who works at TechCorp?"
+
+  People at TechCorp: Alice, Bob
+
+$ memory-graph ask "List all people"
+
+  Found 2 people: Alice (CTO), Bob (Senior Engineer)
+
+$ memory-graph path "Bob" "PostgreSQL"
+
+  Path found (3 hops):
+  Bob ──[MEMBER_OF]──→ Platform team ──[LED_BY]──→ Alice ──[USES]──→ PostgreSQL

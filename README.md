@@ -1,31 +1,66 @@
-# agent-memory-graph
+<p align="center">
+  <img src="https://img.shields.io/badge/🧠_Agent_Memory_Graph-Knowledge_that_persists-blueviolet?style=for-the-badge" alt="Agent Memory Graph" />
+</p>
 
-> Domain-agnostic knowledge graph memory for AI agents. Zero-config, local-first, SQLite-powered.
+<p align="center">
+  <strong>Give your AI agent a persistent, queryable memory — powered by a local knowledge graph.</strong>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-18%2B-green.svg" alt="Node.js 18+" /></a>
+  <img src="https://img.shields.io/badge/SQLite-FTS5-orange.svg" alt="SQLite FTS5" />
+  <img src="https://img.shields.io/badge/Zero_Config-✓-brightgreen.svg" alt="Zero Config" />
+  <img src="https://img.shields.io/badge/LLM-Any_Provider-purple.svg" alt="Any LLM" />
+</p>
 
-## What is this?
+---
 
-A lightweight knowledge graph that any AI agent can use to remember entities and their relationships. No cloud, no Neo4j, no complex setup — just `npm install` and go.
+## The Problem
 
-**Key features:**
-- 🧠 **Auto-extraction** — LLM extracts entities and relationships from any text
-- 🔍 **Natural language queries** — Ask questions, get graph-powered answers
-- 📦 **Single SQLite file** — Zero external dependencies, fully portable
-- 🌐 **Domain-agnostic** — Works for any topic: code, crypto, research, CRM, notes
-- ⚡ **Zero-config start** — Works out of the box, customize when you need to
-- 🔄 **Import existing memory** — Sync from MEMORY.md, notes, or any markdown
-- 📊 **Visualize** — Export as Mermaid, DOT, JSON, or CSV
+AI agents forget everything between sessions. Context windows overflow. MEMORY.md files become unstructured dumps. RAG retrieval misses relationships.
 
-## Quick Start
+## The Solution
+
+**agent-memory-graph** builds a structured knowledge graph from your conversations — automatically. Every person, project, tool, and relationship is extracted, stored locally in SQLite, and queryable with natural language.
+
+```
+You: "I just met Viktor, the CTO of Nexus Labs. They're building SkyNet-X using Rust."
+
+→ Graph auto-extracts:
+  Viktor (Person) ──[CTO_OF]──→ Nexus Labs (Company)
+  Nexus Labs ──[BUILDS]──→ SkyNet-X (Project)
+  SkyNet-X ──[USES]──→ Rust (Language)
+
+You: "Who works at Nexus Labs?"
+→ "People at Nexus Labs: Viktor"
+
+You: "How is Viktor connected to Rust?"
+→ "Viktor →[CTO_OF]→ Nexus Labs →[BUILDS]→ SkyNet-X →[USES]→ Rust"
+```
+
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| 🧠 **Auto-extraction** | LLM extracts entities & relationships from any text |
+| 🗣️ **Natural language queries** | Ask questions like "Who works at X?" or "What does Y use?" |
+| 🔗 **Path finding** | Discover hidden connections between entities (BFS, up to 5 hops) |
+| 📦 **Single SQLite file** | Zero external deps, fully portable, survives restarts |
+| 🌐 **Domain-agnostic** | Software, crypto, research, CRM, notes — anything |
+| ⚡ **Zero-config** | Works out of the box with any OpenAI-compatible LLM |
+| 🔌 **OpenClaw plugin** | Auto-ingests every conversation, registers query tools |
+| 🔍 **Full-text search** | SQLite FTS5 for fast keyword search |
+| 📊 **Export** | Mermaid, DOT, JSON, CSV for visualization |
+
+---
+
+## 🚀 Quick Start
 
 ```bash
-# Install
 npm install agent-memory-graph
-
-# Or use globally
-npm install -g agent-memory-graph
 ```
 
 ### As a library
@@ -35,21 +70,22 @@ import { MemoryGraph } from 'agent-memory-graph';
 
 const graph = new MemoryGraph();
 
-// Ingest text — entities and relationships are auto-extracted
-await graph.ingest("Alice and Bob are building Project Atlas using Rust and PostgreSQL");
+// Ingest — entities and relationships are auto-extracted
+await graph.ingest(
+  "Alice is the CTO of TechCorp. She leads the Platform team " +
+  "and uses Kubernetes, Go, and PostgreSQL."
+);
 
-// Ask questions
-const answer = await graph.ask("What is Project Atlas built with?");
-console.log(answer);
-// → "Project Atlas uses Rust and PostgreSQL"
+// Query with natural language
+await graph.ask("What does Alice use?");
+// → "Alice: USES → Kubernetes, Go, PostgreSQL"
 
-// Find connections
-const path = graph.findPath("Alice", "PostgreSQL");
-console.log(path);
-// → Alice -[WORKS_ON]-> Project Atlas -[USES]-> PostgreSQL
+await graph.ask("Who works at TechCorp?");
+// → "People at TechCorp: Alice"
 
-// Export as Mermaid diagram
-console.log(graph.export('mermaid'));
+// Find hidden connections
+graph.findPath("Bob", "PostgreSQL");
+// → Bob →[MEMBER_OF]→ Platform team →[LED_BY]→ Alice →[USES]→ PostgreSQL
 
 graph.close();
 ```
@@ -57,54 +93,75 @@ graph.close();
 ### As a CLI
 
 ```bash
-# Extract from text
-memory-graph ingest "I started learning Rust for the new backend service"
+# Ingest from text
+memory-graph ingest "Started learning Rust for the new backend service"
 
 # Ask questions
 memory-graph ask "What am I learning?"
+# → "Found: Rust (Language)"
 
-# Search
+# Search entities
 memory-graph search "Rust"
 
-# Add manually
-memory-graph add entity "Docker" Tool
-memory-graph add relation "Backend Service" DEPLOYED_WITH "Docker"
+# Find paths
+memory-graph path "Alice" "PostgreSQL"
 
 # Visualize
 memory-graph visualize --format mermaid
 
-# Import existing notes
-memory-graph sync --source ./MEMORY.md
-
 # Stats
 memory-graph stats
+# → Entities: 42 | Relationships: 67 | Types: Person, Tool, Project...
 ```
 
-### As an OpenClaw skill
+---
 
-Place this in your OpenClaw workspace skills directory. The agent will automatically use it when:
-- You mention entities in conversation
-- You ask relationship questions
-- You want to visualize your knowledge graph
+## 🔌 OpenClaw Plugin (Recommended)
 
-### As an OpenClaw Plugin
+The killer feature: install as an OpenClaw plugin and your agent **automatically remembers everything**.
 
-Install as a plugin for automatic conversation ingestion:
+### Install
 
 ```bash
-# Install the plugin
-openclaw plugins install agent-memory-graph --dangerously-force-unsafe-install
-
-# Restart gateway to load
+openclaw plugins install agent-memory-graph
 openclaw gateway restart
 ```
 
-Once installed, the plugin:
-- **Auto-ingests** every inbound message (>20 chars) into the knowledge graph
-- **Registers 5 tools** the agent can call: `memory_graph_ingest`, `memory_graph_search`, `memory_graph_query`, `memory_graph_path`, `memory_graph_stats`
-- **Persists** all data in `~/.openclaw/data/memory-graph.db` (survives /reset and /new)
+### What happens next
 
-Plugin config in `openclaw.json`:
+1. **Every message** (>20 chars) is auto-ingested into the knowledge graph
+2. **5 tools** are registered for the agent to call:
+   - `memory_graph_ingest` — manually add knowledge
+   - `memory_graph_query` — natural language questions
+   - `memory_graph_search` — keyword search
+   - `memory_graph_path` — find connections between entities
+   - `memory_graph_stats` — graph statistics
+3. **Data persists** in `~/.openclaw/data/memory-graph.db` — survives `/new`, `/reset`, and restarts
+
+### Demo: Auto-detect in action
+
+```
+[19:02] You: Hey, I just met Viktor who's the CTO of Nexus Labs.
+             They're building SkyNet-X using Rust and ROS2.
+
+        ┌─ memory-graph hook ─────────────────────────────┐
+        │ ✓ Auto-ingested: 4 entities, 5 relationships    │
+        │   Viktor (Person), Nexus Labs (Company),         │
+        │   SkyNet-X (Project), Rust (Language)            │
+        └──────────────────────────────────────────────────┘
+
+[19:05] You: Who works at Nexus Labs?
+
+        Agent calls: memory_graph_query("Who works at Nexus Labs?")
+        → "People at Nexus Labs: Viktor"
+
+[19:06] You: How is Viktor connected to Rust?
+
+        Agent calls: memory_graph_path("Viktor", "Rust")
+        → "Viktor →[CTO_OF]→ Nexus Labs →[BUILDS]→ SkyNet-X →[USES]→ Rust"
+```
+
+### Plugin config
 
 ```json
 {
@@ -116,7 +173,7 @@ Plugin config in `openclaw.json`:
           "autoIngest": true,
           "extractionModel": "gpt-4o-mini",
           "dbPath": "~/.openclaw/data/memory-graph.db",
-          "maxHops": 3,
+          "maxHops": 5,
           "minConfidence": 0.7
         }
       }
@@ -125,190 +182,160 @@ Plugin config in `openclaw.json`:
 }
 ```
 
-Set `autoIngest: false` to disable the hook and only use manual tool calls.
+Set `autoIngest: false` to disable auto-ingestion and only use manual tool calls.
 
-## Configuration
+---
 
-Works with zero configuration. Optionally create `config/graph.config.json`:
+## 🧪 Query Examples
 
-```json
-{
-  "storage": {
-    "path": "./memory-graph.db"
-  },
-  "extraction": {
-    "provider": "auto",
-    "model": "auto",
-    "autoExtract": true,
-    "minConfidence": 0.7
-  },
-  "domains": [
-    {
-      "name": "my-domain",
-      "entityHints": ["Person", "Project", "Tool"],
-      "relationHints": ["WORKS_ON", "USES", "OWNS"]
-    }
-  ],
-  "query": {
-    "maxHops": 3,
-    "maxResults": 10
-  }
-}
+The NL query engine understands 12+ question patterns:
+
+| Question | What it does |
+|----------|-------------|
+| "What is Alice working on?" | Find outgoing relationships |
+| "Who works at TechCorp?" | Find people connected to entity |
+| "Where did Bob work before?" | Find PREVIOUSLY_WORKED_AT relations |
+| "What does the team use?" | Find USES relationships |
+| "What is Alice's role?" | Look up role property/relation |
+| "List all people" | Filter by type (normalizes "people" → "Person") |
+| "List all companies" | Type normalization works for all types |
+| "How is A connected to B?" | BFS path finding |
+| "Who suggested X?" | Verb-to-relation matching |
+| "What tools are mentioned?" | Type-based listing |
+
+---
+
+## 📊 Graph Visualization
+
+```mermaid
+graph LR
+    classDef person fill:#3b82f6,stroke:#1d4ed8,color:#fff
+    classDef company fill:#f97316,stroke:#c2410c,color:#fff
+    classDef project fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    classDef tool fill:#10b981,stroke:#047857,color:#fff
+
+    Alice[Alice - CTO]:::person
+    Bob[Bob - Engineer]:::person
+    TechCorp[TechCorp]:::company
+    Platform[Platform Team]:::project
+    K8s[Kubernetes]:::tool
+    Go[Go]:::tool
+    PG[PostgreSQL]:::tool
+
+    Alice -->|CTO_OF| TechCorp
+    Alice -->|LEADS| Platform
+    Alice -->|USES| K8s
+    Alice -->|USES| Go
+    Alice -->|USES| PG
+    Bob -->|MEMBER_OF| Platform
+    Bob -->|WORKS_AT| TechCorp
 ```
+
+---
+
+## ⚙️ Configuration
 
 ### LLM Provider
 
-The extraction engine needs an LLM. Supports any OpenAI-compatible API.
-
-**Environment variables:**
+Works with **any OpenAI-compatible API** — OpenAI, Anthropic (via proxy), Ollama, LiteLLM, vLLM, 9router, etc.
 
 | Variable | Description | Default |
-|----------|-------------|--------|
-| `OPENAI_API_KEY` | API key for your LLM provider | `sk-local` (for local proxies) |
-| `OPENAI_BASE_URL` | Base URL for OpenAI-compatible API | `http://127.0.0.1:20128/v1` |
-| `MEMORY_GRAPH_API_KEY` | Override API key (takes priority if OPENAI_API_KEY not set) | — |
-| `MEMORY_GRAPH_BASE_URL` | Override base URL (takes priority if OPENAI_BASE_URL not set) | — |
-| `MEMORY_GRAPH_MODEL` | Override extraction model | `gpt-4o-mini` |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | API key | `sk-local` |
+| `OPENAI_BASE_URL` | API base URL | `http://127.0.0.1:20128/v1` |
+| `MEMORY_GRAPH_API_KEY` | Override API key | — |
+| `MEMORY_GRAPH_BASE_URL` | Override base URL | — |
+| `MEMORY_GRAPH_MODEL` | Override model | `gpt-4o-mini` |
 
 **Examples:**
 
 ```bash
-# OpenAI directly
+# OpenAI
 export OPENAI_API_KEY="sk-..."
-export OPENAI_BASE_URL="https://api.openai.com/v1"
 
-# Anthropic via OpenAI-compatible proxy (e.g., LiteLLM, 9router)
-export OPENAI_API_KEY="sk-local"
+# Anthropic via LiteLLM/9router
 export OPENAI_BASE_URL="http://127.0.0.1:4000/v1"
 export MEMORY_GRAPH_MODEL="claude-3-5-haiku-20241022"
 
-# Ollama (local, free)
-export OPENAI_API_KEY="ollama"
+# Ollama (free, local)
 export OPENAI_BASE_URL="http://localhost:11434/v1"
 export MEMORY_GRAPH_MODEL="llama3.1"
 ```
 
-Provider is auto-detected via the OpenAI SDK. No LLM needed for manual operations (add, search, path, stats).
+### Domain Hints (optional)
 
-### Domain Hints
-
-Optional hints improve extraction accuracy for your specific use case:
+Improve extraction accuracy for your specific domain:
 
 ```json
 {
-  "domains": [
-    {
-      "name": "software",
-      "entityHints": ["Person", "Repository", "Language", "Framework", "Service", "Database"],
-      "relationHints": ["MAINTAINS", "USES", "DEPENDS_ON", "DEPLOYS_TO", "WRITTEN_IN"]
-    }
-  ]
+  "domains": [{
+    "name": "software",
+    "entityHints": ["Person", "Repository", "Language", "Framework", "Service"],
+    "relationHints": ["MAINTAINS", "USES", "DEPENDS_ON", "DEPLOYS_TO"]
+  }]
 }
 ```
 
-Without domains, the LLM auto-detects entity types from context.
+---
 
-## API Reference
-
-### `MemoryGraph`
-
-```typescript
-new MemoryGraph(options?: { path?: string; configPath?: string; config?: Partial<Config> })
-```
-
-#### Core Methods
-
-| Method | Description |
-|--------|-------------|
-| `ingest(text, options?)` | Extract and store entities/relationships from text |
-| `ask(question)` | Natural language query against the graph |
-| `search(query, limit?)` | Search entities by keyword |
-
-#### Entity Management
-
-| Method | Description |
-|--------|-------------|
-| `addEntity(name, type, properties?)` | Add entity manually |
-| `addRelation(from, relation, to)` | Add relationship manually |
-| `findEntity(name, type?)` | Find entity by name |
-| `listEntities(options?)` | List entities (filter by type) |
-| `deleteEntity(nameOrId)` | Delete entity and its relationships |
-
-#### Graph Operations
-
-| Method | Description |
-|--------|-------------|
-| `findPath(from, to, maxHops?)` | Shortest path between entities |
-| `neighborhood(name, hops?)` | All entities within N hops |
-
-#### Import / Export
-
-| Method | Description |
-|--------|-------------|
-| `export(format)` | Export graph (json, mermaid, dot, csv) |
-| `importFrom(path)` | Import from file or directory |
-
-#### Maintenance
-
-| Method | Description |
-|--------|-------------|
-| `deduplicate(options?)` | Find/merge duplicate entities |
-| `stats()` | Graph statistics |
-| `close()` | Close database connection |
-
-## Use Case Examples
-
-### Software Development
-Track projects, team members, tech stack, and dependencies.
-
-### Personal CRM
-Remember people, companies, interactions, and context.
-
-### Research Notes
-Connect papers, topics, authors, and findings.
-
-### Crypto / DeFi
-Track tokens, wallets, protocols, and positions.
-
-### Content Creation
-Map topics, articles, keywords, and publishing platforms.
-
-See `examples/` for detailed walkthroughs.
-
-## Architecture
+## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│            MemoryGraph API              │
-├─────────────────────────────────────────┤
-│  Ingest  │  Query  │  Search  │ Export │
-├──────────┼─────────┼──────────┼────────┤
-│ Extractor│ NL Query│  Hybrid  │ Mermaid│
-│ (LLM)   │ Engine  │  Search  │ JSON   │
-├──────────┴─────────┴──────────┴────────┤
-│           GraphEngine (SQLite)          │
-│  Entities │ Relationships │ FTS5 Index │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│            MemoryGraph API                   │
+├─────────────────────────────────────────────┤
+│  Ingest  │  Query   │  Search  │  Export    │
+├──────────┼──────────┼──────────┼───────────┤
+│ LLM      │ NL Query │ FTS5     │ Mermaid   │
+│ Extractor│ Engine   │ Hybrid   │ DOT/JSON  │
+├──────────┴──────────┴──────────┴───────────┤
+│         GraphEngine (SQLite + WAL)          │
+│  Entities │ Relationships │ FTS5 Index      │
+└─────────────────────────────────────────────┘
 ```
 
 - **SQLite** — Single file, WAL mode, FTS5 full-text search
-- **LLM extraction** — Any provider (OpenAI, Anthropic, Ollama)
-- **Graph traversal** — BFS pathfinding, neighborhood queries
+- **LLM extraction** — Any OpenAI-compatible provider
+- **NL Query Engine** — 12+ regex patterns + smart entity-name fallback
+- **Graph traversal** — BFS pathfinding up to 5 hops
 - **Deduplication** — Levenshtein-based entity merging
+- **Persistence** — Survives process restarts, session resets, and agent reboots
 
-## Contributing
+---
 
-PRs welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+## 📈 Test Results
 
-```bash
-# Development
-git clone https://github.com/openclaw/agent-memory-graph
-cd agent-memory-graph
-npm install
-npm run dev    # Watch mode
-npm test       # Run tests
+```
+✓ Unit tests: 38/38 pass
+✓ NL Query accuracy: 10/10 (local), 9.5/10 (plugin E2E)
+✓ Path finding: 4/4 pass
+✓ Edge cases: graceful handling, zero crashes
+✓ Zero hallucination: no fabricated relationships
+✓ Persistence: data survives /new, /reset, gateway restart
 ```
 
-## License
+---
 
-[MIT](LICENSE)
+## 🤝 Contributing
+
+PRs welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+```bash
+git clone https://github.com/KLSGG/agent-memory-graph
+cd agent-memory-graph
+npm install
+npm test       # 38 tests
+npm run dev    # Watch mode
+```
+
+---
+
+## 📄 License
+
+[MIT](LICENSE) — Use it however you want.
+
+---
+
+<p align="center">
+  <em>Built for <a href="https://github.com/openclaw/openclaw">OpenClaw</a> agents that need to remember.</em>
+</p>
