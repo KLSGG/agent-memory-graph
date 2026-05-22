@@ -1,0 +1,71 @@
+{
+  "name": "agent-memory-graph",
+  "version": "0.1.0",
+  "description": "Domain-agnostic knowledge graph memory for AI agents. Zero-config, local-first, SQLite-powered. Works as OpenClaw skill (CLI) or plugin (auto-hook).",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "bin": {
+    "memory-graph": "dist/cli/index.js"
+  },
+  "openclaw": {
+    "extensions": ["./dist/plugin/entry.js"],
+    "compat": {
+      "pluginApi": ">=2026.3.24-beta.2",
+      "minGatewayVersion": "2026.3.24-beta.2"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "memory",
+    "knowledge-graph",
+    "graph-database",
+    "sqlite",
+    "llm",
+    "openclaw",
+    "openclaw-plugin",
+    "local-first",
+    "domain-agnostic"
+  ],
+  "author": "KL <klgamefi@github>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openclaw/agent-memory-graph"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "nanoid": "^5.0.9",
+    "openai": "^4.78.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "eslint": "^9.0.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.24-beta.2",
+    "@sinclair/typebox": ">=0.32.0",
+    "@anthropic-ai/sdk": ">=0.30.0"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": { "optional": true },
+    "@sinclair/typebox": { "optional": true },
+    "@anthropic-ai/sdk": { "optional": true }
+  }
+}

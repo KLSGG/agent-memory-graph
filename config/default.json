@@ -1,0 +1,28 @@
+{
+  "storage": {
+    "path": "./memory-graph.db",
+    "maxSizeMb": 500
+  },
+  "extraction": {
+    "provider": "auto",
+    "model": "auto",
+    "autoExtract": true,
+    "minConfidence": 0.7,
+    "batchSize": 5
+  },
+  "domains": [],
+  "deduplication": {
+    "enabled": true,
+    "similarityThreshold": 0.85
+  },
+  "sync": {
+    "memoryMd": null,
+    "neuralMemory": null,
+    "importOnStart": false
+  },
+  "query": {
+    "maxHops": 3,
+    "maxResults": 10,
+    "includeConfidence": true
+  }
+}

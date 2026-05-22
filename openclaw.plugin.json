@@ -1,0 +1,55 @@
+{
+  "id": "memory-graph",
+  "name": "Memory Graph",
+  "description": "Auto-builds a knowledge graph from conversations. Extracts entities and relationships from every message, stores in local SQLite, and exposes query/search/path tools to the agent.",
+  "contracts": {
+    "tools": ["memory_graph_query", "memory_graph_ingest", "memory_graph_search", "memory_graph_path", "memory_graph_stats"]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "description": "Path to SQLite database file",
+        "default": "~/.openclaw/data/memory-graph.db"
+      },
+      "autoIngest": {
+        "type": "boolean",
+        "description": "Automatically extract entities from every inbound message",
+        "default": true
+      },
+      "minConfidence": {
+        "type": "number",
+        "description": "Minimum confidence threshold for extracted entities (0.0-1.0)",
+        "default": 0.7
+      },
+      "extractionModel": {
+        "type": "string",
+        "description": "Model to use for entity extraction (empty = use default agent model)",
+        "default": ""
+      },
+      "maxHops": {
+        "type": "number",
+        "description": "Maximum graph traversal hops for path queries",
+        "default": 3
+      },
+      "domains": {
+        "type": "array",
+        "description": "Optional domain hints to improve extraction accuracy",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "entityHints": { "type": "array", "items": { "type": "string" } },
+            "relationHints": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "default": []
+      }
+    },
+    "additionalProperties": false
+  }
+}
