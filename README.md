@@ -123,9 +123,11 @@ The killer feature: install as an OpenClaw plugin and your agent **automatically
 ### Install
 
 ```bash
-openclaw plugins install agent-memory-graph
+openclaw plugins install agent-memory-graph --dangerously-force-unsafe-install
 openclaw gateway restart
 ```
+
+> ⚠️ The `--dangerously-force-unsafe-install` flag is required because the plugin reads environment variables (API keys) and makes network calls (to your LLM provider). This is expected behavior for LLM-powered extraction.
 
 ### What happens next
 
