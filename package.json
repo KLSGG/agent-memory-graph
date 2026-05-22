@@ -9,7 +9,9 @@
     "memory-graph": "dist/cli/index.js"
   },
   "openclaw": {
-    "extensions": ["./dist/plugin/entry.js"],
+    "extensions": [
+      "./dist/plugin/entry.js"
+    ],
     "compat": {
       "pluginApi": ">=2026.3.24-beta.2",
       "minGatewayVersion": "2026.3.24-beta.2"
@@ -36,11 +38,11 @@
     "local-first",
     "domain-agnostic"
   ],
-  "author": "KL <klgamefi@github>",
+  "author": "KLSGG",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/openclaw/agent-memory-graph"
+    "url": "https://github.com/KLSGG/agent-memory-graph"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -64,8 +66,25 @@
     "@anthropic-ai/sdk": ">=0.30.0"
   },
   "peerDependenciesMeta": {
-    "openclaw": { "optional": true },
-    "@sinclair/typebox": { "optional": true },
-    "@anthropic-ai/sdk": { "optional": true }
+    "openclaw": {
+      "optional": true
+    },
+    "@sinclair/typebox": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist/",
+    "config/",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "homepage": "https://github.com/KLSGG/agent-memory-graph#readme",
+  "bugs": {
+    "url": "https://github.com/KLSGG/agent-memory-graph/issues"
   }
 }

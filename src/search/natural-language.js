@@ -146,9 +146,9 @@ async function queryWhoAtEntity(engine, entityName, config) {
       confidence: 0.85
     };
   }
-  const allConnected = [...incoming, ...outgoing].filter((r) => r.from_type?.toLowerCase() === "person" || r.to_type?.toLowerCase() === "person").map(
-    (r) => r.from_type?.toLowerCase() === "person" ? { name: r.from_name, type: r.from_type } : { name: r.to_name, type: r.to_type }
-  );
+  const incomingPeople = incoming.filter((r) => r.from_type?.toLowerCase() === "person").map((r) => ({ name: r.from_name, type: r.from_type }));
+  const outgoingPeople = outgoing.filter((r) => r.to_type?.toLowerCase() === "person").map((r) => ({ name: r.to_name, type: r.to_type }));
+  const allConnected = [...incomingPeople, ...outgoingPeople];
   const unique = [...new Map(allConnected.map((r) => [r.name, r])).values()];
   if (unique.length > 0) {
     return {
