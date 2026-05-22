@@ -5,7 +5,7 @@ import { hybridSearch } from './search/hybrid.js';
 import { naturalLanguageQuery } from './search/natural-language.js';
 import { exportGraph } from './sync/export.js';
 import { importFromMemoryMd, importFromDirectory } from './sync/memory-md.js';
-import { findDuplicates, mergeEntities } from './extract/dedup.js';
+import { findDuplicates, mergeEntities, autoDedup } from './extract/dedup.js';
 /**
  * MemoryGraph — Domain-agnostic knowledge graph for AI agents.
  *
@@ -24,6 +24,8 @@ import { findDuplicates, mergeEntities } from './extract/dedup.js';
 export class MemoryGraph {
     engine;
     config;
+    ingestCount = 0;
+    DEDUP_INTERVAL = 10; // Run auto-dedup every N ingestions
     constructor(options = {}) {
         this.config = loadConfig(options.configPath);
         // Apply inline overrides
@@ -48,15 +50,27 @@ export class MemoryGraph {
         }
         // Store relationships
         for (const rel of result.relationships) {
+            const props = {};
+            if (rel.when)
+                props.when = rel.when;
             this.engine.addRelation(rel.from, rel.relation, rel.to, {
                 source: options.source,
                 confidence: rel.confidence,
                 fromType: rel.fromType,
                 toType: rel.toType,
+                properties: props,
             });
         }
         // Log extraction
         this.engine.logExtraction(text, result.entities, result.relationships, options.sessionId);
+        // Auto-dedup every N ingestions
+        this.ingestCount++;
+        if (this.ingestCount % this.DEDUP_INTERVAL === 0) {
+            try {
+                autoDedup(this.engine);
+            }
+            catch (_) { /* non-blocking */ }
+        }
         return result;
     }
     /**

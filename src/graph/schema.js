@@ -1,7 +1,7 @@
-import Database from 'better-sqlite3';
-import { resolve } from 'node:path';
-import { mkdirSync } from 'node:fs';
-const SCHEMA_VERSION = 1;
+import Database from "better-sqlite3";
+import { resolve } from "node:path";
+import { mkdirSync } from "node:fs";
+const SCHEMA_VERSION = 2;
 const SCHEMA_SQL = `
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS _meta (
@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS entities (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   source TEXT,
-  confidence REAL DEFAULT 1.0
+  confidence REAL DEFAULT 1.0,
+  mention_count INTEGER DEFAULT 1
 );
 
 -- Relationships (graph edges)
@@ -79,36 +80,47 @@ CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE ON entities BEGIN
   VALUES (new.rowid, new.name, new.type, new.properties);
 END;
 `;
-export class SchemaManager {
-    db;
-    constructor(dbPath) {
-        // Ensure directory exists
-        const dir = resolve(dbPath, '..');
-        mkdirSync(dir, { recursive: true });
-        this.db = new Database(dbPath);
-        this.db.pragma('journal_mode = WAL');
-        this.db.pragma('foreign_keys = ON');
+class SchemaManager {
+  db;
+  constructor(dbPath) {
+    const dir = resolve(dbPath, "..");
+    mkdirSync(dir, { recursive: true });
+    this.db = new Database(dbPath);
+    this.db.pragma("journal_mode = WAL");
+    this.db.pragma("foreign_keys = ON");
+  }
+  /** Initialize schema (idempotent) */
+  initialize() {
+    this.db.exec(SCHEMA_SQL);
+    const currentVersion = this.getVersion();
+    if (currentVersion < 2) {
+      try {
+        this.db.exec(`ALTER TABLE entities ADD COLUMN mention_count INTEGER DEFAULT 1`);
+      } catch (_) {
+      }
     }
-    /** Initialize schema (idempotent) */
-    initialize() {
-        this.db.exec(SCHEMA_SQL);
-        // Set schema version
-        const stmt = this.db.prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`);
-        stmt.run(String(SCHEMA_VERSION));
-        return this.db;
+    const stmt = this.db.prepare(
+      `INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`
+    );
+    stmt.run(String(SCHEMA_VERSION));
+    return this.db;
+  }
+  /** Get current schema version */
+  getVersion() {
+    try {
+      const row = this.db.prepare(
+        `SELECT value FROM _meta WHERE key = 'schema_version'`
+      ).get();
+      return row ? parseInt(row.value, 10) : 0;
+    } catch {
+      return 0;
     }
-    /** Get current schema version */
-    getVersion() {
-        try {
-            const row = this.db.prepare(`SELECT value FROM _meta WHERE key = 'schema_version'`).get();
-            return row ? parseInt(row.value, 10) : 0;
-        }
-        catch {
-            return 0;
-        }
-    }
-    /** Close database connection */
-    close() {
-        this.db.close();
-    }
+  }
+  /** Close database connection */
+  close() {
+    this.db.close();
+  }
 }
+export {
+  SchemaManager
+};

@@ -16,7 +16,7 @@ var SCHEMA_VERSION, SCHEMA_SQL, SchemaManager;
 var init_schema = __esm({
   "src/graph/schema.js"() {
     "use strict";
-    SCHEMA_VERSION = 1;
+    SCHEMA_VERSION = 2;
     SCHEMA_SQL = `
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS _meta (
@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS entities (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   source TEXT,
-  confidence REAL DEFAULT 1.0
+  confidence REAL DEFAULT 1.0,
+  mention_count INTEGER DEFAULT 1
 );
 
 -- Relationships (graph edges)
@@ -106,14 +107,25 @@ END;
       /** Initialize schema (idempotent) */
       initialize() {
         this.db.exec(SCHEMA_SQL);
-        const stmt = this.db.prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`);
+        const currentVersion = this.getVersion();
+        if (currentVersion < 2) {
+          try {
+            this.db.exec(`ALTER TABLE entities ADD COLUMN mention_count INTEGER DEFAULT 1`);
+          } catch (_) {
+          }
+        }
+        const stmt = this.db.prepare(
+          `INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`
+        );
         stmt.run(String(SCHEMA_VERSION));
         return this.db;
       }
       /** Get current schema version */
       getVersion() {
         try {
-          const row = this.db.prepare(`SELECT value FROM _meta WHERE key = 'schema_version'`).get();
+          const row = this.db.prepare(
+            `SELECT value FROM _meta WHERE key = 'schema_version'`
+          ).get();
           return row ? parseInt(row.value, 10) : 0;
         } catch {
           return 0;
@@ -144,6 +156,7 @@ var init_engine = __esm({
       addEntity(name, type, properties = {}, options = {}) {
         const existing = this.findEntityByName(name, type);
         if (existing) {
+          this.db.prepare(`UPDATE entities SET mention_count = mention_count + 1 WHERE id = ?`).run(existing.id);
           return this.updateEntity(existing.id, { properties, ...options });
         }
         const id = `e-${nanoid(12)}`;
@@ -151,7 +164,16 @@ var init_engine = __esm({
         this.db.prepare(`
       INSERT INTO entities (id, name, type, properties, created_at, updated_at, source, confidence)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, name, type, JSON.stringify(properties), now, now, options.source ?? null, options.confidence ?? 1);
+    `).run(
+          id,
+          name,
+          type,
+          JSON.stringify(properties),
+          now,
+          now,
+          options.source ?? null,
+          options.confidence ?? 1
+        );
         return { id, name, type, properties, created_at: now, updated_at: now, source: options.source, confidence: options.confidence ?? 1 };
       }
       getEntity(id) {
@@ -165,8 +187,7 @@ var init_engine = __esm({
       }
       updateEntity(id, updates) {
         const existing = this.getEntity(id);
-        if (!existing)
-          throw new Error(`Entity ${id} not found`);
+        if (!existing) throw new Error(`Entity ${id} not found`);
         const merged = {
           name: updates.name ?? existing.name,
           type: updates.type ?? existing.type,
@@ -178,16 +199,31 @@ var init_engine = __esm({
         this.db.prepare(`
       UPDATE entities SET name = ?, type = ?, properties = ?, source = ?, confidence = ?, updated_at = ?
       WHERE id = ?
-    `).run(merged.name, merged.type, JSON.stringify(merged.properties), merged.source ?? null, merged.confidence, now, id);
+    `).run(
+          merged.name,
+          merged.type,
+          JSON.stringify(merged.properties),
+          merged.source ?? null,
+          merged.confidence,
+          now,
+          id
+        );
         return { ...existing, ...merged, updated_at: now };
       }
       deleteEntity(id) {
         const result = this.db.prepare(`DELETE FROM entities WHERE id = ?`).run(id);
         return result.changes > 0;
       }
+      reassignRelationships(fromEntityId, toEntityId) {
+        const now = (/* @__PURE__ */ new Date()).toISOString();
+        const r1 = this.db.prepare(`UPDATE relationships SET from_id = ?, updated_at = ? WHERE from_id = ?`).run(toEntityId, now, fromEntityId);
+        const r2 = this.db.prepare(`UPDATE relationships SET to_id = ?, updated_at = ? WHERE to_id = ?`).run(toEntityId, now, fromEntityId);
+        this.db.prepare(`DELETE FROM relationships WHERE from_id = to_id`).run();
+        return r1.changes + r2.changes;
+      }
       listEntities(options = {}) {
         const { type, limit = 100, offset = 0 } = options;
-        const query = type ? `SELECT * FROM entities WHERE type = ? COLLATE NOCASE ORDER BY updated_at DESC LIMIT ? OFFSET ?` : `SELECT * FROM entities ORDER BY updated_at DESC LIMIT ? OFFSET ?`;
+        const query = type ? `SELECT * FROM entities WHERE type = ? COLLATE NOCASE ORDER BY mention_count DESC, updated_at DESC LIMIT ? OFFSET ?` : `SELECT * FROM entities ORDER BY mention_count DESC, updated_at DESC LIMIT ? OFFSET ?`;
         const rows = type ? this.db.prepare(query).all(type, limit, offset) : this.db.prepare(query).all(limit, offset);
         return rows.map((r) => this.rowToEntity(r));
       }
@@ -217,7 +253,17 @@ var init_engine = __esm({
         this.db.prepare(`
       INSERT INTO relationships (id, from_id, to_id, relation, properties, created_at, updated_at, source, confidence)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, fromEntity.id, toEntity.id, relation, JSON.stringify(options.properties ?? {}), now, now, options.source ?? null, options.confidence ?? 1);
+    `).run(
+          id,
+          fromEntity.id,
+          toEntity.id,
+          relation,
+          JSON.stringify(options.properties ?? {}),
+          now,
+          now,
+          options.source ?? null,
+          options.confidence ?? 1
+        );
         return {
           id,
           from_id: fromEntity.id,
@@ -286,16 +332,14 @@ var init_engine = __esm({
       findPath(fromName, toName, maxHops = 3) {
         const fromEntity = this.findEntityByName(fromName);
         const toEntity = this.findEntityByName(toName);
-        if (!fromEntity || !toEntity)
-          return null;
+        if (!fromEntity || !toEntity) return null;
         const queue = [
           { entityId: fromEntity.id, path: [fromEntity.name], relations: [] }
         ];
         const visited = /* @__PURE__ */ new Set([fromEntity.id]);
         while (queue.length > 0) {
           const current = queue.shift();
-          if (current.path.length > maxHops + 1)
-            break;
+          if (current.path.length > maxHops + 1) break;
           const outgoing = this.db.prepare(`
         SELECT r.relation, r.to_id as neighbor_id, e.name as neighbor_name
         FROM relationships r JOIN entities e ON r.to_id = e.id
@@ -334,8 +378,7 @@ var init_engine = __esm({
        */
       getNeighborhood(entityName, hops = 1) {
         const entity = this.findEntityByName(entityName);
-        if (!entity)
-          return { entities: [], relationships: [] };
+        if (!entity) return { entities: [], relationships: [] };
         const entityIds = /* @__PURE__ */ new Set([entity.id]);
         const relIds = /* @__PURE__ */ new Set();
         let frontier = [entity.id];
@@ -498,7 +541,9 @@ var init_defaults = __esm({
 function buildPrompt(text, domains) {
   const domainContext = domains.length > 0 ? `
 Domain hints (use these to improve accuracy):
-${domains.map((d) => `- ${d.name}: entities=[${d.entityHints.join(", ")}], relations=[${d.relationHints.join(", ")}]`).join("\n")}
+${domains.map(
+    (d) => `- ${d.name}: entities=[${d.entityHints.join(", ")}], relations=[${d.relationHints.join(", ")}]`
+  ).join("\n")}
 ` : "";
   return `You are an entity and relationship extractor. Given text, extract all meaningful entities and their relationships.
 
@@ -511,14 +556,18 @@ Rules:
 6. Do NOT hallucinate entities not mentioned or strongly implied in the text
 7. Normalize entity names (capitalize properly, use full names when available)
 8. Use UPPER_SNAKE_CASE for relationship types (WORKS_ON, USES, OWNS, etc.)
+9. Extract temporal context when mentioned (dates, timeframes, "last year", "in 2024", "recently"). Store as properties: {"when": "2024", "temporal": "joined in 2024"}
+10. For relationships with time context, include a "when" property: {"from": "X", "relation": "JOINED", "to": "Y", "when": "2024"}
+11. Do NOT extract tokens, API keys, passwords, hashes, or secrets as entities
+12. Do NOT extract CLI commands (/new, /reset, /status) as entities
 ${domainContext}
 Return ONLY valid JSON (no markdown, no explanation):
 {
   "entities": [
-    {"name": "Entity Name", "type": "Type", "properties": {}, "confidence": 0.9}
+    {"name": "Entity Name", "type": "Type", "properties": {"role": "CTO", "when": "2024"}, "confidence": 0.9}
   ],
   "relationships": [
-    {"from": "Entity A", "relation": "RELATION_TYPE", "to": "Entity B", "fromType": "TypeA", "toType": "TypeB", "confidence": 0.85}
+    {"from": "Entity A", "relation": "RELATION_TYPE", "to": "Entity B", "fromType": "TypeA", "toType": "TypeB", "confidence": 0.85, "when": "optional temporal context"}
   ]
 }
 
@@ -534,17 +583,17 @@ function detectProvider(config) {
   if (config.extraction.provider !== "auto") {
     return config.extraction.provider;
   }
-  if (process.env.OPENAI_API_KEY)
-    return "openai";
-  if (process.env.ANTHROPIC_API_KEY)
-    return "anthropic";
-  if (process.env.OLLAMA_HOST || process.env.OLLAMA_URL)
-    return "ollama";
+  if (process.env.OPENAI_API_KEY) return "openai";
+  if (process.env.ANTHROPIC_API_KEY) return "anthropic";
+  if (process.env.OLLAMA_HOST || process.env.OLLAMA_URL) return "ollama";
   return null;
 }
 async function callOpenAI(prompt, model) {
   const { default: OpenAI } = await import("openai");
-  const client = new OpenAI();
+  const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY || "sk-local",
+    baseURL: process.env.OPENAI_BASE_URL || "http://127.0.0.1:20128/v1"
+  });
   const response = await client.chat.completions.create({
     model: model === "auto" ? "gpt-4o-mini" : model,
     messages: [{ role: "user", content: prompt }],
@@ -585,7 +634,9 @@ async function callOllama(prompt, model) {
 async function extractFromText(text, config) {
   const provider = detectProvider(config);
   if (!provider) {
-    throw new Error("No LLM provider available. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OLLAMA_HOST.");
+    throw new Error(
+      "No LLM provider available. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OLLAMA_HOST."
+    );
   }
   const prompt = buildPrompt(text, config.domains);
   const model = config.extraction.model;
@@ -1221,13 +1272,10 @@ function findDuplicates(engine, threshold = 0.85) {
   const duplicates = [];
   const processed = /* @__PURE__ */ new Set();
   for (let i = 0; i < entities.length; i++) {
-    if (processed.has(entities[i].id))
-      continue;
+    if (processed.has(entities[i].id)) continue;
     for (let j = i + 1; j < entities.length; j++) {
-      if (processed.has(entities[j].id))
-        continue;
-      if (entities[i].type.toLowerCase() !== entities[j].type.toLowerCase())
-        continue;
+      if (processed.has(entities[j].id)) continue;
+      if (entities[i].type.toLowerCase() !== entities[j].type.toLowerCase()) continue;
       const sim = nameSimilarity(entities[i].name, entities[j].name);
       if (sim >= threshold) {
         duplicates.push({
@@ -1244,20 +1292,38 @@ function findDuplicates(engine, threshold = 0.85) {
 function mergeEntities(engine, keepId, mergeId) {
   const keep = engine.getEntity(keepId);
   const merge = engine.getEntity(mergeId);
-  if (!keep || !merge)
-    return false;
+  if (!keep || !merge) return false;
   const mergedProps = { ...merge.properties, ...keep.properties };
   engine.updateEntity(keepId, { properties: mergedProps });
+  engine.reassignRelationships(mergeId, keepId);
   engine.deleteEntity(mergeId);
   return true;
+}
+function autoDedup(engine) {
+  const entities = engine.listEntities({ limit: 1e4 });
+  let mergeCount = 0;
+  const merged = /* @__PURE__ */ new Set();
+  for (let i = 0; i < entities.length; i++) {
+    if (merged.has(entities[i].id)) continue;
+    for (let j = i + 1; j < entities.length; j++) {
+      if (merged.has(entities[j].id)) continue;
+      if (entities[i].type.toLowerCase() !== entities[j].type.toLowerCase()) continue;
+      const sim = nameSimilarity(entities[i].name, entities[j].name);
+      if (sim >= 0.9) {
+        const [keep, remove] = entities[i].name.length >= entities[j].name.length ? [entities[i], entities[j]] : [entities[j], entities[i]];
+        mergeEntities(engine, keep.id, remove.id);
+        merged.add(remove.id);
+        mergeCount++;
+      }
+    }
+  }
+  return mergeCount;
 }
 function nameSimilarity(a, b) {
   const na = a.toLowerCase().trim();
   const nb = b.toLowerCase().trim();
-  if (na === nb)
-    return 1;
-  if (na.includes(nb) || nb.includes(na))
-    return 0.9;
+  if (na === nb) return 1;
+  if (na.includes(nb) || nb.includes(na)) return 0.9;
   const dist = levenshtein(na, nb);
   const maxLen = Math.max(na.length, nb.length);
   return maxLen === 0 ? 1 : 1 - dist / maxLen;
@@ -1266,10 +1332,8 @@ function levenshtein(a, b) {
   const m = a.length;
   const n = b.length;
   const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++)
-    dp[i][0] = i;
-  for (let j = 0; j <= n; j++)
-    dp[0][j] = j;
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
       dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
@@ -1303,6 +1367,9 @@ var init_src = __esm({
     MemoryGraph = class {
       engine;
       config;
+      ingestCount = 0;
+      DEDUP_INTERVAL = 10;
+      // Run auto-dedup every N ingestions
       constructor(options = {}) {
         this.config = loadConfig(options.configPath);
         if (options.config) {
@@ -1324,14 +1391,24 @@ var init_src = __esm({
           });
         }
         for (const rel of result.relationships) {
+          const props = {};
+          if (rel.when) props.when = rel.when;
           this.engine.addRelation(rel.from, rel.relation, rel.to, {
             source: options.source,
             confidence: rel.confidence,
             fromType: rel.fromType,
-            toType: rel.toType
+            toType: rel.toType,
+            properties: props
           });
         }
         this.engine.logExtraction(text, result.entities, result.relationships, options.sessionId);
+        this.ingestCount++;
+        if (this.ingestCount % this.DEDUP_INTERVAL === 0) {
+          try {
+            autoDedup(this.engine);
+          } catch (_) {
+          }
+        }
         return result;
       }
       /**
@@ -1379,8 +1456,7 @@ var init_src = __esm({
        */
       deleteEntity(nameOrId) {
         const entity = this.engine.getEntity(nameOrId) ?? this.engine.findEntityByName(nameOrId);
-        if (!entity)
-          return false;
+        if (!entity) return false;
         return this.engine.deleteEntity(entity.id);
       }
       // ─── Graph Operations ──────────────────────────────────────────
@@ -1500,6 +1576,39 @@ async function getGraph(config) {
   }
   return graphInstance;
 }
+var messageBuffer = [];
+var batchTimer = null;
+var BATCH_WINDOW_MS = 15e3;
+var BATCH_MAX_MESSAGES = 5;
+async function flushBatch(config) {
+  if (messageBuffer.length === 0) return;
+  const batch = messageBuffer.splice(0, messageBuffer.length);
+  const combinedText = batch.map((m) => m.text).join("\n");
+  const source = `chat:${batch[0].senderId}`;
+  const sessionKey = batch[0].sessionKey;
+  try {
+    const graph = await getGraph(config);
+    await graph.ingest(combinedText, { source, sessionId: sessionKey });
+  } catch (err) {
+    console.warn("[memory-graph] Batch ingest failed:", err.message);
+  }
+}
+var COMMAND_PATTERNS = /^\s*[\/!](new|reset|status|help|start|stop|restart|approve|elevated|exec|reasoning|model|clear)\b/i;
+var TOKEN_PATTERNS = /(?:npm_|clh_|ghp_|gho_|sk-|xox[bpas]-|Bearer\s+|token[:\s]+\S{20,}|[A-Za-z0-9_-]{40,})/;
+var CASUAL_PATTERNS = /^\s*(ok|oke|okie|oki|yes|no|yep|nope|sure|đi|đc|dc|ừ|ờ|uh|hmm|hm|ah|oh|wow|nice|cool|good|great|thanks|thx|cảm ơn|sao rồi|sao r|ổn không|ổn k|gà ơi|gà|em ơi|sếp ơi|aira ơi|tiếp|tiếp đi|continue|go|done|xong|rồi|chưa|có|không|ko|k|đúng|sai|được|đc rồi|ok em|ok anh)\s*[?!.]*\s*$/i;
+var URL_ONLY_PATTERN = /^\s*(https?:\/\/\S+\s*)+$/;
+var MIN_MEANINGFUL_LENGTH = 30;
+var MIN_WORD_COUNT = 5;
+function shouldIngest(text) {
+  if (text.length < MIN_MEANINGFUL_LENGTH) return false;
+  if (COMMAND_PATTERNS.test(text)) return false;
+  if (TOKEN_PATTERNS.test(text)) return false;
+  if (CASUAL_PATTERNS.test(text)) return false;
+  if (URL_ONLY_PATTERN.test(text)) return false;
+  const wordCount = text.split(/\s+/).filter((w) => w.length > 1).length;
+  if (wordCount < MIN_WORD_COUNT) return false;
+  return true;
+}
 var entry_default = definePluginEntry({
   id: "memory-graph",
   name: "Memory Graph",
@@ -1511,16 +1620,28 @@ var entry_default = definePluginEntry({
         const config = event.context?.pluginConfig;
         if (config?.autoIngest === false) return;
         const text = typeof event.content === "string" ? event.content : event.content?.text || event.content?.body || "";
-        if (!text || text.length < 20) return;
-        try {
-          const graph = await getGraph(config);
-          await graph.ingest(text, {
-            source: `chat:${event.senderId || "unknown"}`,
-            sessionId: event.sessionKey
-          });
-        } catch (err) {
-          console.warn("[memory-graph] Auto-ingest failed:", err.message);
+        if (!text || !shouldIngest(text)) return;
+        messageBuffer.push({
+          text,
+          senderId: event.senderId || "unknown",
+          sessionKey: event.sessionKey || "",
+          timestamp: Date.now()
+        });
+        if (messageBuffer.length >= BATCH_MAX_MESSAGES) {
+          if (batchTimer) {
+            clearTimeout(batchTimer);
+            batchTimer = null;
+          }
+          await flushBatch(config);
+          return;
         }
+        if (batchTimer) clearTimeout(batchTimer);
+        batchTimer = setTimeout(() => {
+          batchTimer = null;
+          flushBatch(config).catch((err) => {
+            console.warn("[memory-graph] Batch flush failed:", err.message);
+          });
+        }, BATCH_WINDOW_MS);
       },
       { priority: 10 }
     );

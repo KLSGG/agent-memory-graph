@@ -28,20 +28,56 @@ export function findDuplicates(engine, threshold = 0.85) {
     return duplicates;
 }
 /**
- * Merge duplicate entity into target (moves all relationships).
+ * Merge duplicate entity into target (moves all relationships, then deletes duplicate).
  */
 export function mergeEntities(engine, keepId, mergeId) {
     const keep = engine.getEntity(keepId);
     const merge = engine.getEntity(mergeId);
     if (!keep || !merge)
         return false;
-    // Merge properties
+    // Merge properties (keep's properties take priority)
     const mergedProps = { ...merge.properties, ...keep.properties };
     engine.updateEntity(keepId, { properties: mergedProps });
-    // This requires direct DB access — we'll handle via the engine's internal db
-    // For now, delete the duplicate (relationships cascade)
+    // Move all relationships from merge → keep
+    engine.reassignRelationships(mergeId, keepId);
+    // Delete the duplicate
     engine.deleteEntity(mergeId);
     return true;
+}
+/**
+ * Auto-dedup: find and merge entities that are clearly the same.
+ * Uses stricter rules than findDuplicates for automatic merging:
+ * - Same type
+ * - One name contains the other (e.g., "KL" vs "Sếp KL")
+ * - Or Levenshtein similarity >= 0.9
+ */
+export function autoDedup(engine) {
+    const entities = engine.listEntities({ limit: 10000 });
+    let mergeCount = 0;
+    const merged = new Set();
+    for (let i = 0; i < entities.length; i++) {
+        if (merged.has(entities[i].id))
+            continue;
+        for (let j = i + 1; j < entities.length; j++) {
+            if (merged.has(entities[j].id))
+                continue;
+            // Same type required
+            if (entities[i].type.toLowerCase() !== entities[j].type.toLowerCase())
+                continue;
+            const sim = nameSimilarity(entities[i].name, entities[j].name);
+            // Only auto-merge at very high confidence (0.9+)
+            if (sim >= 0.9) {
+                // Keep the longer/more descriptive name
+                const [keep, remove] = entities[i].name.length >= entities[j].name.length
+                    ? [entities[i], entities[j]]
+                    : [entities[j], entities[i]];
+                mergeEntities(engine, keep.id, remove.id);
+                merged.add(remove.id);
+                mergeCount++;
+            }
+        }
+    }
+    return mergeCount;
 }
 /**
  * Simple name similarity using normalized Levenshtein distance.

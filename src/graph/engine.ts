@@ -52,7 +52,8 @@ export class GraphEngine {
   ): Entity {
     const existing = this.findEntityByName(name, type);
     if (existing) {
-      // Update existing entity
+      // Increment mention count + update
+      this.db.prepare(`UPDATE entities SET mention_count = mention_count + 1 WHERE id = ?`).run(existing.id);
       return this.updateEntity(existing.id, { properties, ...options });
     }
 
@@ -131,12 +132,22 @@ export class GraphEngine {
     return result.changes > 0;
   }
 
+  reassignRelationships(fromEntityId: string, toEntityId: string): number {
+    const now = new Date().toISOString();
+    const r1 = this.db.prepare(`UPDATE relationships SET from_id = ?, updated_at = ? WHERE from_id = ?`).run(toEntityId, now, fromEntityId);
+    const r2 = this.db.prepare(`UPDATE relationships SET to_id = ?, updated_at = ? WHERE to_id = ?`).run(toEntityId, now, fromEntityId);
+    // Remove self-referencing relationships that may have been created
+    this.db.prepare(`DELETE FROM relationships WHERE from_id = to_id`).run();
+    return r1.changes + r2.changes;
+  }
+
   listEntities(options: { type?: string; limit?: number; offset?: number } = {}): Entity[] {
     const { type, limit = 100, offset = 0 } = options;
 
+    // Sort by relevance: mention_count DESC, then updated_at DESC
     const query = type
-      ? `SELECT * FROM entities WHERE type = ? COLLATE NOCASE ORDER BY updated_at DESC LIMIT ? OFFSET ?`
-      : `SELECT * FROM entities ORDER BY updated_at DESC LIMIT ? OFFSET ?`;
+      ? `SELECT * FROM entities WHERE type = ? COLLATE NOCASE ORDER BY mention_count DESC, updated_at DESC LIMIT ? OFFSET ?`
+      : `SELECT * FROM entities ORDER BY mention_count DESC, updated_at DESC LIMIT ? OFFSET ?`;
 
     const rows = type
       ? this.db.prepare(query).all(type, limit, offset) as any[]

@@ -12,6 +12,7 @@ export interface ExtractedRelation {
     fromType?: string;
     toType?: string;
     confidence: number;
+    when?: string;
 }
 export interface ExtractionResult {
     entities: ExtractedEntity[];

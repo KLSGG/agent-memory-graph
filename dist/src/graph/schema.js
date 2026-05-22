@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const SCHEMA_SQL = `
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS _meta (
@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS entities (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   source TEXT,
-  confidence REAL DEFAULT 1.0
+  confidence REAL DEFAULT 1.0,
+  mention_count INTEGER DEFAULT 1
 );
 
 -- Relationships (graph edges)
@@ -92,6 +93,15 @@ export class SchemaManager {
     /** Initialize schema (idempotent) */
     initialize() {
         this.db.exec(SCHEMA_SQL);
+        // Migrations
+        const currentVersion = this.getVersion();
+        if (currentVersion < 2) {
+            // Add mention_count column if missing (v1 → v2)
+            try {
+                this.db.exec(`ALTER TABLE entities ADD COLUMN mention_count INTEGER DEFAULT 1`);
+            }
+            catch (_) { /* column already exists */ }
+        }
         // Set schema version
         const stmt = this.db.prepare(`INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)`);
         stmt.run(String(SCHEMA_VERSION));

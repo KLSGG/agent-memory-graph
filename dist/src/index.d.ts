@@ -30,6 +30,8 @@ export interface MemoryGraphOptions {
 export declare class MemoryGraph {
     private engine;
     private config;
+    private ingestCount;
+    private readonly DEDUP_INTERVAL;
     constructor(options?: MemoryGraphOptions);
     /**
      * Ingest text: extract entities and relationships, store in graph.

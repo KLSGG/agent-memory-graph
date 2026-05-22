@@ -14,6 +14,7 @@ export interface ExtractedRelation {
   fromType?: string;
   toType?: string;
   confidence: number;
+  when?: string;
 }
 
 export interface ExtractionResult {
@@ -42,14 +43,18 @@ Rules:
 6. Do NOT hallucinate entities not mentioned or strongly implied in the text
 7. Normalize entity names (capitalize properly, use full names when available)
 8. Use UPPER_SNAKE_CASE for relationship types (WORKS_ON, USES, OWNS, etc.)
+9. Extract temporal context when mentioned (dates, timeframes, "last year", "in 2024", "recently"). Store as properties: {"when": "2024", "temporal": "joined in 2024"}
+10. For relationships with time context, include a "when" property: {"from": "X", "relation": "JOINED", "to": "Y", "when": "2024"}
+11. Do NOT extract tokens, API keys, passwords, hashes, or secrets as entities
+12. Do NOT extract CLI commands (/new, /reset, /status) as entities
 ${domainContext}
 Return ONLY valid JSON (no markdown, no explanation):
 {
   "entities": [
-    {"name": "Entity Name", "type": "Type", "properties": {}, "confidence": 0.9}
+    {"name": "Entity Name", "type": "Type", "properties": {"role": "CTO", "when": "2024"}, "confidence": 0.9}
   ],
   "relationships": [
-    {"from": "Entity A", "relation": "RELATION_TYPE", "to": "Entity B", "fromType": "TypeA", "toType": "TypeB", "confidence": 0.85}
+    {"from": "Entity A", "relation": "RELATION_TYPE", "to": "Entity B", "fromType": "TypeA", "toType": "TypeB", "confidence": 0.85, "when": "optional temporal context"}
   ]
 }
 

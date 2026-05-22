@@ -44,6 +44,7 @@ export declare class GraphEngine {
         confidence?: number;
     }): Entity;
     deleteEntity(id: string): boolean;
+    reassignRelationships(fromEntityId: string, toEntityId: string): number;
     listEntities(options?: {
         type?: string;
         limit?: number;
