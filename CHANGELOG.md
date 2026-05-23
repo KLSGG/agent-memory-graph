@@ -2,6 +2,17 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.3.0] - 2026-05-23
+
+### Added
+- **Session summary auto-ingestion** — automatically summarizes key actions at end of each session and ingests into the knowledge graph. Uses LLM to extract concrete outcomes (what was built, fixed, published, decided) from the conversation.
+- **Assistant message tracking** — tracks both user and assistant messages for richer session summaries via `message_sent` hook.
+- **Graceful shutdown flush** — on gateway stop, flushes any pending session summaries before closing.
+- New config option `sessionSummary` (boolean, default: true) to enable/disable session summary feature.
+
+### Changed
+- `gateway_stop` hook now drains pending session summaries before closing the graph database.
+
 ## [0.2.1] - 2026-05-22
 
 ### Fixed

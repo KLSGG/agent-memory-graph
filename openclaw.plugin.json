@@ -27,6 +27,11 @@
         "description": "Automatically extract entities from every inbound message",
         "default": true
       },
+      "sessionSummary": {
+        "type": "boolean",
+        "description": "Automatically summarize and ingest key actions at end of each session",
+        "default": true
+      },
       "minConfidence": {
         "type": "number",
         "description": "Minimum confidence threshold for extracted entities (0.0-1.0)",
@@ -74,7 +79,7 @@
     "openclawVersion": ">=2026.3.24",
     "entry": "dist/plugin/entry.js"
   },
-  "version": "0.1.1",
+  "version": "0.3.0",
   "author": "KLSGG",
   "repository": "https://github.com/KLSGG/agent-memory-graph",
   "license": "MIT",

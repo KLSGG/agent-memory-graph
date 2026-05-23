@@ -67,6 +67,12 @@ let batchTimer: ReturnType<typeof setTimeout> | null = null;
 const BATCH_WINDOW_MS = 15000; // 15 seconds window
 const BATCH_MAX_MESSAGES = 5;
 
+// ─── Session Summary Buffer ─────────────────────────────────
+// Track meaningful messages per session for end-of-session summary ingestion
+const sessionMessages: Map<string, { text: string; role: string; timestamp: number }[]> = new Map();
+const SESSION_SUMMARY_MIN_MESSAGES = 5; // Minimum messages to trigger summary
+const SESSION_SUMMARY_MAX_BUFFER = 50; // Max messages to keep per session (rolling window)
+
 async function flushBatch(config: any) {
   if (messageBuffer.length === 0) return;
   
@@ -136,11 +142,21 @@ export default definePluginEntry({
         
         if (!text || !shouldIngest(text)) return;
 
+        // Track message for session summary
+        const sessionKey = event.sessionKey || "";
+        if (sessionKey) {
+          if (!sessionMessages.has(sessionKey)) sessionMessages.set(sessionKey, []);
+          const msgs = sessionMessages.get(sessionKey)!;
+          msgs.push({ text, role: "user", timestamp: Date.now() });
+          // Rolling window: keep only last N messages
+          if (msgs.length > SESSION_SUMMARY_MAX_BUFFER) msgs.shift();
+        }
+
         // Batch mode: buffer messages and flush after window or max count
         messageBuffer.push({
           text,
           senderId: event.senderId || "unknown",
-          sessionKey: event.sessionKey || "",
+          sessionKey: sessionKey,
           timestamp: Date.now(),
         });
 
@@ -163,8 +179,108 @@ export default definePluginEntry({
       { priority: 10 },
     );
 
+    // ─── Hook: Track assistant messages for session summary ─────
+    api.on(
+      "message_sent",
+      async (event) => {
+        const config = (event as any).context?.pluginConfig;
+        if (config?.sessionSummary === false) return;
+
+        const text = typeof event.content === 'string' ? event.content : ((event as any).content?.text || "");
+        const sessionKey = (event as any).sessionKey || "";
+        if (!text || !sessionKey || text.length < MIN_MEANINGFUL_LENGTH) return;
+
+        if (!sessionMessages.has(sessionKey)) sessionMessages.set(sessionKey, []);
+        const msgs = sessionMessages.get(sessionKey)!;
+        msgs.push({ text: text.slice(0, 500), role: "assistant", timestamp: Date.now() });
+        if (msgs.length > SESSION_SUMMARY_MAX_BUFFER) msgs.shift();
+      },
+      { priority: 10 },
+    );
+
+    // ─── Hook: Session end — summarize & ingest ─────────────────
+    api.on(
+      "session_end",
+      async (event, ctx) => {
+        const config = (ctx as any)?.pluginConfig;
+        if (config?.sessionSummary === false) return;
+
+        const sessionKey = (event as any).sessionKey || (event as any).sessionId || "";
+        const msgs = sessionMessages.get(sessionKey);
+        
+        // Cleanup buffer regardless
+        sessionMessages.delete(sessionKey);
+
+        if (!msgs || msgs.length < SESSION_SUMMARY_MIN_MESSAGES) return;
+
+        try {
+          const graph = await getGraph(config);
+          
+          // Build a condensed transcript for summarization
+          const transcript = msgs
+            .map(m => `[${m.role}]: ${m.text}`)
+            .join('\n')
+            .slice(0, 3000); // Cap at 3000 chars for LLM input
+
+          // Use LLM to generate a structured summary
+          const { OpenAI } = await import('openai');
+          const client = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY,
+            baseURL: process.env.OPENAI_BASE_URL,
+          });
+
+          const summaryResponse = await client.chat.completions.create({
+            model: config?.extractionModel || process.env.MEMORY_GRAPH_MODEL || "kr/claude-haiku-4.5",
+            messages: [
+              {
+                role: "system",
+                content: `You are a session summarizer for a knowledge graph. Given a conversation transcript, extract a 2-4 sentence summary of KEY ACTIONS taken (what was built, fixed, published, decided, configured). Focus on concrete outcomes, versions, platforms, and decisions. Skip casual chat. If nothing meaningful happened, respond with "NO_SUMMARY". Output plain text only.`,
+              },
+              {
+                role: "user",
+                content: transcript,
+              },
+            ],
+            max_tokens: 300,
+            temperature: 0.3,
+          });
+
+          const summary = summaryResponse.choices?.[0]?.message?.content?.trim();
+          if (!summary || summary === "NO_SUMMARY" || summary.length < 20) return;
+
+          // Ingest the summary into the graph
+          const today = new Date().toISOString().split('T')[0];
+          await graph.ingest(summary, {
+            source: `session-summary-${today}`,
+            sessionId: sessionKey,
+          });
+
+          console.log(`[memory-graph] Session summary ingested (${msgs.length} messages → ${summary.length} chars)`);
+        } catch (err) {
+          console.warn("[memory-graph] Session summary ingestion failed:", (err as Error).message);
+        }
+      },
+      { priority: 10 },
+    );
+
     // ─── Hook: Cleanup on gateway stop ──────────────────────────
     api.on("gateway_stop", async () => {
+      // Flush any remaining session summaries
+      for (const [key, msgs] of sessionMessages.entries()) {
+        if (msgs.length >= SESSION_SUMMARY_MIN_MESSAGES) {
+          try {
+            const graph = await getGraph(null);
+            const transcript = msgs.map(m => `[${m.role}]: ${m.text}`).join('\n').slice(0, 3000);
+            const today = new Date().toISOString().split('T')[0];
+            await graph.ingest(`Session ended during shutdown. Messages: ${transcript.slice(0, 500)}`, {
+              source: `session-summary-${today}-shutdown`,
+              sessionId: key,
+            });
+          } catch (_) { /* best effort */ }
+        }
+      }
+      sessionMessages.clear();
+
       if (graphInstance) {
         graphInstance.close();
         graphInstance = null;
