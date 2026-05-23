@@ -2,6 +2,17 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.6.0] - 2026-05-23
+
+### Added
+- **Relation normalization** (Thoth-inspired) — synonymous relations are mapped to canonical forms. E.g., `EMPLOYED_BY`, `WORKS_FOR`, `HIRED_BY` all normalize to `WORKS_AT`. Reduces relation type explosion.
+- **Vague relation rejection** — meaningless relations like `RELATED_TO`, `ASSOCIATED_WITH`, `IS`, `INVOLVES`, `AFFECTS` are automatically rejected during extraction. Keeps the graph clean and queryable.
+- New module `src/extract/relations.ts` with `normalizeRelation()`, `isVagueRelation()`, `getCanonicalRelation()` utilities.
+
+### Changed
+- Extraction pipeline now normalizes all relations before storing. Existing graph data is unaffected (normalization applies to new ingestions only).
+- Case normalization: `located_in` and `LOCATED_IN` now both resolve to `LOCATED_IN`.
+
 ## [0.5.1] - 2026-05-23
 
 ### Fixed

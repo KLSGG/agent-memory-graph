@@ -1,4 +1,5 @@
 import type { Config, Domain } from '../config/schema.js';
+import { normalizeRelation } from './relations.js';
 
 export interface ExtractedEntity {
   name: string;
@@ -194,15 +195,20 @@ export async function extractFromText(text: string, config: Config): Promise<Ext
 
     const relationships: ExtractedRelation[] = (parsed.relationships || [])
       .filter((r: any) => r.from && r.relation && r.to && (r.confidence ?? 1) >= config.extraction.minConfidence)
-      .map((r: any) => ({
-        from: String(r.from).trim(),
-        relation: String(r.relation).trim().toUpperCase().replace(/\s+/g, '_'),
-        to: String(r.to).trim(),
-        fromType: r.fromType?.trim(),
-        toType: r.toType?.trim(),
-        confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8)),
-        when: r.when ? String(r.when).trim() : undefined,
-      }));
+      .map((r: any) => {
+        const rawRelation = String(r.relation).trim().toUpperCase().replace(/\s+/g, '_');
+        const normalized = normalizeRelation(rawRelation);
+        return normalized ? {
+          from: String(r.from).trim(),
+          relation: normalized,
+          to: String(r.to).trim(),
+          fromType: r.fromType?.trim(),
+          toType: r.toType?.trim(),
+          confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8)),
+          when: r.when ? String(r.when).trim() : undefined,
+        } : null;
+      })
+      .filter((r: any): r is ExtractedRelation => r !== null);
 
     return { entities, relationships };
   } catch (err) {

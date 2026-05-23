@@ -4736,6 +4736,128 @@ function loadConfig(configPath) {
   return ConfigSchema.parse({});
 }
 
+// src/extract/relations.ts
+var VAGUE_RELATIONS = /* @__PURE__ */ new Set([
+  "RELATED_TO",
+  "ASSOCIATED_WITH",
+  "CONNECTED_TO",
+  "LINKED_TO",
+  "IS",
+  "IS_NOT",
+  "HAS",
+  "INVOLVES",
+  "AFFECTS",
+  "INTERACTS_WITH",
+  "CORRESPONDS_TO",
+  "PERTAINS_TO",
+  "BELONGS_TO",
+  "REFERS_TO",
+  "DEALS_WITH",
+  "CONCERNS"
+]);
+var RELATION_SYNONYMS = {
+  // Employment
+  "EMPLOYED_BY": "WORKS_AT",
+  "EMPLOYED_AT": "WORKS_AT",
+  "WORKS_FOR": "WORKS_AT",
+  "HIRED_BY": "WORKS_AT",
+  "JOINED": "WORKS_AT",
+  "WORKED_FOR": "PREVIOUSLY_WORKED_AT",
+  "WORKED_AT": "PREVIOUSLY_WORKED_AT",
+  "LEFT": "PREVIOUSLY_WORKED_AT",
+  // Creation/Building
+  "CREATED": "BUILDS",
+  "BUILT": "BUILDS",
+  "DEVELOPED": "BUILDS",
+  "DEVELOPING": "BUILDS",
+  "AUTHORED": "BUILDS",
+  "WROTE": "BUILDS",
+  "MADE": "BUILDS",
+  "DESIGNED": "BUILDS",
+  // Ownership
+  "OWNS": "OWNS",
+  "FOUNDED": "FOUNDED",
+  "CO_FOUNDED": "FOUNDED",
+  // Publishing
+  "PUBLISHED_AS": "PUBLISHED",
+  "PUBLISHED_ON": "PUBLISHED_TO",
+  "PUBLISHED_TO": "PUBLISHED_TO",
+  "PUSH_TO": "PUBLISHED_TO",
+  "RELEASED": "PUBLISHED",
+  "DEPLOYED": "PUBLISHED",
+  "DEPLOYS_TO": "PUBLISHED_TO",
+  // Usage
+  "UTILIZES": "USES",
+  "EMPLOYS": "USES",
+  "LEVERAGES": "USES",
+  "RUNS_ON": "USES",
+  "POWERED_BY": "USES",
+  "BUILT_WITH": "USES",
+  "DEPENDS_ON": "USES",
+  // Collaboration
+  "COLLABORATES_ON": "WORKS_WITH",
+  "COLLABORATES_WITH": "WORKS_WITH",
+  "PARTNERS_WITH": "WORKS_WITH",
+  "COOPERATES_WITH": "WORKS_WITH",
+  // Part-of
+  "PART_OF": "PART_OF",
+  "COMPONENT_OF": "PART_OF",
+  "INCLUDED_IN": "PART_OF",
+  "SUBSET_OF": "PART_OF",
+  "CONTAINS": "CONTAINS",
+  "INCLUDES": "CONTAINS",
+  "INCLUDES_FEATURE": "CONTAINS",
+  "HAS_SUBSYSTEM": "CONTAINS",
+  // Support
+  "SUPPORTS": "SUPPORTS",
+  "COMPATIBLE_WITH": "SUPPORTS",
+  "INTEGRATES_WITH": "SUPPORTS",
+  "PLUGIN_FOR": "SUPPORTS",
+  // Testing
+  "TESTED": "TESTS",
+  "TESTED_BY": "TESTS",
+  "TESTED_WITH": "TESTS",
+  "TEST_WITH": "TESTS",
+  "TESTS_MEMORY_OF": "TESTS",
+  "VERIFIED": "TESTS",
+  "VERIFIES": "TESTS",
+  // Fixing
+  "FIXED": "FIXES",
+  "FIXED_IN": "FIXES",
+  "RESOLVES": "FIXES",
+  "MODIFIED_TO_FIX": "FIXES",
+  // Location
+  "LOCATED_IN": "LOCATED_IN",
+  "BASED_IN": "LOCATED_IN",
+  "HEADQUARTERED_IN": "LOCATED_IN",
+  // Leadership
+  "LEADS": "LEADS",
+  "MANAGES": "LEADS",
+  "HEADS": "LEADS",
+  "DIRECTS": "LEADS",
+  // Investment
+  "INVESTED_IN": "INVESTED_IN",
+  "FUNDED": "INVESTED_IN",
+  "BACKED_BY": "INVESTED_IN",
+  // Specialization
+  "SPECIALIZED_IN": "SPECIALIZES_IN",
+  "SPECIALIZES_IN": "SPECIALIZES_IN",
+  "EXPERT_IN": "SPECIALIZES_IN",
+  "EXPERIENCED_WITH": "SPECIALIZES_IN",
+  // Migration
+  "MIGRATING_FROM": "MIGRATING_FROM",
+  "MIGRATING_TO": "MIGRATING_TO",
+  "REPLACES": "REPLACES",
+  "ALTERNATIVE_TO": "ALTERNATIVE_TO"
+};
+function normalizeRelation(relation) {
+  const normalized = relation.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  if (VAGUE_RELATIONS.has(normalized)) {
+    return null;
+  }
+  return RELATION_SYNONYMS[normalized] || normalized;
+}
+
 // src/extract/extractor.ts
 function buildPrompt(text, domains) {
   const domainContext = domains.length > 0 ? `
@@ -4863,15 +4985,19 @@ async function extractFromText(text, config) {
       properties: e.properties ?? {},
       confidence: Math.min(1, Math.max(0, Number(e.confidence) || 0.8))
     }));
-    const relationships = (parsed.relationships || []).filter((r) => r.from && r.relation && r.to && (r.confidence ?? 1) >= config.extraction.minConfidence).map((r) => ({
-      from: String(r.from).trim(),
-      relation: String(r.relation).trim().toUpperCase().replace(/\s+/g, "_"),
-      to: String(r.to).trim(),
-      fromType: r.fromType?.trim(),
-      toType: r.toType?.trim(),
-      confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8)),
-      when: r.when ? String(r.when).trim() : void 0
-    }));
+    const relationships = (parsed.relationships || []).filter((r) => r.from && r.relation && r.to && (r.confidence ?? 1) >= config.extraction.minConfidence).map((r) => {
+      const rawRelation = String(r.relation).trim().toUpperCase().replace(/\s+/g, "_");
+      const normalized = normalizeRelation(rawRelation);
+      return normalized ? {
+        from: String(r.from).trim(),
+        relation: normalized,
+        to: String(r.to).trim(),
+        fromType: r.fromType?.trim(),
+        toType: r.toType?.trim(),
+        confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8)),
+        when: r.when ? String(r.when).trim() : void 0
+      } : null;
+    }).filter((r) => r !== null);
     return { entities, relationships };
   } catch (err) {
     console.warn("[agent-memory-graph] Failed to parse extraction response:", err);

@@ -1,3 +1,4 @@
+import { normalizeRelation } from './relations.js';
 /**
  * Build the extraction prompt based on config and optional domain hints.
  */
@@ -148,15 +149,20 @@ export async function extractFromText(text, config) {
         }));
         const relationships = (parsed.relationships || [])
             .filter((r) => r.from && r.relation && r.to && (r.confidence ?? 1) >= config.extraction.minConfidence)
-            .map((r) => ({
-            from: String(r.from).trim(),
-            relation: String(r.relation).trim().toUpperCase().replace(/\s+/g, '_'),
-            to: String(r.to).trim(),
-            fromType: r.fromType?.trim(),
-            toType: r.toType?.trim(),
-            confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8)),
-            when: r.when ? String(r.when).trim() : undefined,
-        }));
+            .map((r) => {
+            const rawRelation = String(r.relation).trim().toUpperCase().replace(/\s+/g, '_');
+            const normalized = normalizeRelation(rawRelation);
+            return normalized ? {
+                from: String(r.from).trim(),
+                relation: normalized,
+                to: String(r.to).trim(),
+                fromType: r.fromType?.trim(),
+                toType: r.toType?.trim(),
+                confidence: Math.min(1, Math.max(0, Number(r.confidence) || 0.8)),
+                when: r.when ? String(r.when).trim() : undefined,
+            } : null;
+        })
+            .filter((r) => r !== null);
         return { entities, relationships };
     }
     catch (err) {
