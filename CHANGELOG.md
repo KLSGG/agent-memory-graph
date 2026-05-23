@@ -2,6 +2,19 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.9.0] - 2026-05-23
+
+### Added
+- **Local rule-based extraction** (ICM/Cloudflare-inspired) — zero LLM cost entity/relationship extraction using pattern matching and heuristics. Detects Person, Company, Project, Tool, Location entities and common relations (WORKS_AT, BUILDS, USES, LOCATED_IN, etc.).
+- **Hybrid extraction mode** (default) — tries local extraction first, only calls LLM when text is complex and local results are insufficient. Reduces API costs by ~70-80%.
+- Config option `extraction.mode`: `"local"` | `"llm"` | `"hybrid"` (default: hybrid).
+- `needsLLMExtraction()` heuristic: decides when local is sufficient vs when LLM is needed.
+- New module: `src/extract/local-extractor.ts`
+
+### Changed
+- Default extraction mode is now `hybrid` (was always LLM). Users with no API key get local extraction automatically.
+- LLM extraction gracefully falls back to local results on API failure.
+
 ## [0.8.0] - 2026-05-23
 
 ### Added

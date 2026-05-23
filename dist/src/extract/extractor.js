@@ -1,4 +1,5 @@
 import { normalizeRelation } from './relations.js';
+import { localExtract, needsLLMExtraction } from './local-extractor.js';
 /**
  * Build the extraction prompt based on config and optional domain hints.
  */
@@ -110,9 +111,41 @@ async function callOllama(prompt, model) {
     return data.response;
 }
 /**
- * Extract entities and relationships from text using configured LLM.
+ * Extract entities and relationships from text.
+ * Supports 3 modes via config.extraction.mode:
+ * - "local": rule-based only (zero API cost)
+ * - "llm": always use LLM (best quality, costs tokens)
+ * - "hybrid" (default): local first, LLM fallback for complex text
  */
 export async function extractFromText(text, config) {
+    const mode = config.extraction.mode || 'hybrid';
+    // Mode: local only
+    if (mode === 'local') {
+        return localExtract(text);
+    }
+    // Mode: hybrid — try local first, LLM only if needed
+    if (mode === 'hybrid') {
+        const localResult = localExtract(text);
+        if (!needsLLMExtraction(text, localResult)) {
+            return localResult;
+        }
+        // Fall through to LLM extraction
+        try {
+            return await llmExtract(text, config);
+        }
+        catch (err) {
+            // If LLM fails, return local results as fallback
+            console.warn('[memory-graph] LLM extraction failed, using local results:', err.message);
+            return localResult;
+        }
+    }
+    // Mode: llm (always)
+    return llmExtract(text, config);
+}
+/**
+ * LLM-based extraction (original implementation).
+ */
+async function llmExtract(text, config) {
     const provider = detectProvider(config);
     if (!provider) {
         throw new Error('No LLM provider available. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OLLAMA_HOST.');

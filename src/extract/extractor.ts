@@ -1,5 +1,6 @@
 import type { Config, Domain } from '../config/schema.js';
 import { normalizeRelation } from './relations.js';
+import { localExtract, needsLLMExtraction } from './local-extractor.js';
 
 export interface ExtractedEntity {
   name: string;
@@ -147,9 +148,44 @@ async function callOllama(prompt: string, model: string): Promise<string> {
 }
 
 /**
- * Extract entities and relationships from text using configured LLM.
+ * Extract entities and relationships from text.
+ * Supports 3 modes via config.extraction.mode:
+ * - "local": rule-based only (zero API cost)
+ * - "llm": always use LLM (best quality, costs tokens)
+ * - "hybrid" (default): local first, LLM fallback for complex text
  */
 export async function extractFromText(text: string, config: Config): Promise<ExtractionResult> {
+  const mode = (config.extraction as any).mode || 'hybrid';
+
+  // Mode: local only
+  if (mode === 'local') {
+    return localExtract(text);
+  }
+
+  // Mode: hybrid — try local first, LLM only if needed
+  if (mode === 'hybrid') {
+    const localResult = localExtract(text);
+    if (!needsLLMExtraction(text, localResult)) {
+      return localResult;
+    }
+    // Fall through to LLM extraction
+    try {
+      return await llmExtract(text, config);
+    } catch (err) {
+      // If LLM fails, return local results as fallback
+      console.warn('[memory-graph] LLM extraction failed, using local results:', (err as Error).message);
+      return localResult;
+    }
+  }
+
+  // Mode: llm (always)
+  return llmExtract(text, config);
+}
+
+/**
+ * LLM-based extraction (original implementation).
+ */
+async function llmExtract(text: string, config: Config): Promise<ExtractionResult> {
   const provider = detectProvider(config);
   if (!provider) {
     throw new Error(
