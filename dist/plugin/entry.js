@@ -6556,13 +6556,25 @@ Created: ${params.entity} -[${params.relation}]-> ${params.newTarget} (confidenc
         const db = graph.getDb();
         const config = ctx?.pluginConfig;
         const model = config?.embeddingModel || "text-embedding-3-small";
-        const count = await embedMissingEntities(db, { model, batchSize: params.batchSize || 20 });
-        return {
-          content: [{
-            type: "text",
-            text: count > 0 ? `Embedded ${count} entities. Run again if more remain.` : `All entities already have embeddings.`
-          }]
-        };
+        const missingCount = db.prepare(`
+          SELECT COUNT(*) as c FROM entities e
+          LEFT JOIN embeddings emb ON e.id = emb.entity_id
+          WHERE emb.id IS NULL AND (e.lifecycle = 'active' OR e.lifecycle IS NULL)
+        `).get();
+        if (missingCount.c === 0) {
+          return { content: [{ type: "text", text: `All entities already have embeddings.` }] };
+        }
+        try {
+          const count = await embedMissingEntities(db, { model, batchSize: params.batchSize || 20 });
+          return {
+            content: [{
+              type: "text",
+              text: count > 0 ? `Embedded ${count} entities (${missingCount.c - count} remaining). Run again if more remain.` : `Embedding failed \u2014 check that an embedding model is available (need OpenAI-compatible embeddings endpoint). ${missingCount.c} entities need embeddings.`
+            }]
+          };
+        } catch (err) {
+          return { content: [{ type: "text", text: `Embedding error: ${err.message}. Ensure OPENAI_API_KEY and OPENAI_BASE_URL point to a provider with embedding support.` }] };
+        }
       }
     });
     api.registerTool({

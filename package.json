@@ -1,6 +1,6 @@
 {
   "name": "agent-memory-graph",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Domain-agnostic knowledge graph memory for AI agents. Zero-config, local-first, SQLite-powered. Works as OpenClaw skill (CLI) or plugin (auto-hook).",
   "type": "module",
   "main": "dist/src/index.js",

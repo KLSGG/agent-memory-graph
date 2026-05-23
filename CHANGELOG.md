@@ -2,6 +2,12 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.7.1] - 2026-05-23
+
+### Fixed
+- `memory_graph_embed` tool now correctly reports when entities need embeddings but embedding API is unavailable (was incorrectly saying "all already have embeddings").
+- Better error messages for embedding failures (guides user to configure embedding provider).
+
 ## [0.7.0] - 2026-05-23
 
 ### Added
