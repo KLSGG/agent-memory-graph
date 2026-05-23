@@ -2,6 +2,20 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.4.0] - 2026-05-23
+
+### Added
+- **Automatic prompt injection** — injects relevant knowledge graph context into every agent prompt via `before_prompt_build` hook. Agents no longer need to manually call graph tools to recall context from previous sessions.
+- **Improved agent_end hook** — directly uses messages from the event payload instead of relying on session buffer. Works reliably for both subagent and main sessions.
+- New config option `promptInjection` (boolean, default: true) to enable/disable automatic context injection.
+
+### Fixed
+- agent_end hook now fires correctly for subagent sessions (removed dependency on `message_received` buffer which doesn't fire for internal messages).
+- Lowered minimum message threshold from 5 to 2 meaningful messages for session summary generation.
+
+### Changed
+- Session summary logic simplified: uses `event.messages` directly from agent_end instead of maintaining a separate session buffer.
+
 ## [0.3.0] - 2026-05-23
 
 ### Added

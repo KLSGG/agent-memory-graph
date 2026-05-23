@@ -90,6 +90,47 @@ var entry_default = definePluginEntry({
   description: "Auto-builds a knowledge graph from conversations. Extracts entities/relationships and exposes graph query tools.",
   register(api) {
     api.on(
+      "before_prompt_build",
+      async (event, ctx) => {
+        const config = ctx?.pluginConfig;
+        if (config?.promptInjection === false) return;
+        try {
+          const graph = await getGraph(config);
+          const prompt = event.prompt || "";
+          const stats = graph.stats();
+          if (stats.entities === 0) return;
+          let contextLines = [];
+          if (prompt && prompt.length > 10) {
+            const searchTerms = prompt.slice(0, 200);
+            const results = graph.search(searchTerms, 5);
+            if (results.length > 0) {
+              contextLines = results.map((r) => {
+                const rels = r.relations?.slice(0, 3).map((rel) => `${rel.relation} ${rel.target}`).join(", ") || "";
+                return `${r.entity.name} (${r.entity.type})${rels ? ": " + rels : ""}`;
+              });
+            }
+          }
+          if (contextLines.length === 0) {
+            const recentEntities = graph.listEntities({ limit: 5, sortBy: "updated_at" });
+            if (recentEntities.length > 0) {
+              contextLines = recentEntities.map((e) => `${e.name} (${e.type})`);
+            }
+          }
+          if (contextLines.length === 0) return;
+          const injection = `## Knowledge Graph Context (auto-injected by memory-graph plugin)
+Relevant entities from your knowledge graph:
+${contextLines.join("\n")}
+
+Use memory_graph_query or memory_graph_search tools for more details when needed.`;
+          return { appendContext: injection };
+        } catch (err) {
+          console.warn("[memory-graph] Prompt injection failed:", err.message);
+          return;
+        }
+      },
+      { priority: 10 }
+    );
+    api.on(
       "message_received",
       async (event) => {
         const config = event.context?.pluginConfig;
@@ -139,6 +180,58 @@ var entry_default = definePluginEntry({
         const msgs = sessionMessages.get(sessionKey);
         msgs.push({ text: text.slice(0, 500), role: "assistant", timestamp: Date.now() });
         if (msgs.length > SESSION_SUMMARY_MAX_BUFFER) msgs.shift();
+      },
+      { priority: 10 }
+    );
+    api.on(
+      "agent_end",
+      async (event, ctx) => {
+        const config = ctx?.pluginConfig;
+        const sessionKey = ctx?.sessionKey || "";
+        const messages = event.messages || [];
+        console.log(`[memory-graph] agent_end fired: sessionKey=${sessionKey}, messages=${messages.length}, success=${event.success}`);
+        if (config?.sessionSummary === false) return;
+        if (!sessionKey) return;
+        const textParts = [];
+        for (const msg of messages) {
+          const role = msg.role || "unknown";
+          if (role !== "user" && role !== "assistant") continue;
+          const text = typeof msg.content === "string" ? msg.content : Array.isArray(msg.content) ? msg.content.filter((p) => p.type === "text").map((p) => p.text).join(" ") : "";
+          if (!text || text.length < MIN_MEANINGFUL_LENGTH) continue;
+          textParts.push(`[${role}]: ${text.slice(0, 500)}`);
+        }
+        if (textParts.length < 2) return;
+        const transcript = textParts.join("\n").slice(0, 3e3);
+        try {
+          const graph = await getGraph(config);
+          const { OpenAI } = await import("openai");
+          const client = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY,
+            baseURL: process.env.OPENAI_BASE_URL
+          });
+          const summaryResponse = await client.chat.completions.create({
+            model: config?.extractionModel || process.env.MEMORY_GRAPH_MODEL || "kr/claude-haiku-4.5",
+            messages: [
+              {
+                role: "system",
+                content: `You are a session summarizer for a knowledge graph. Given a conversation transcript, extract a 2-4 sentence summary of KEY ACTIONS taken (what was built, fixed, published, decided, configured). Focus on concrete outcomes, versions, platforms, and decisions. Skip casual chat and test/debug noise. If nothing meaningful happened, respond with "NO_SUMMARY". Output plain text only.`
+              },
+              { role: "user", content: transcript }
+            ],
+            max_tokens: 300,
+            temperature: 0.3
+          });
+          const summary = summaryResponse.choices?.[0]?.message?.content?.trim();
+          if (summary && summary !== "NO_SUMMARY" && summary.length >= 20) {
+            const today = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
+            await graph.ingest(summary, { source: `session-summary-${today}`, sessionId: sessionKey });
+            console.log(`[memory-graph] Session summary ingested (${textParts.length} msgs \u2192 ${summary.length} chars)`);
+          } else {
+            console.log(`[memory-graph] No meaningful summary for session (${textParts.length} msgs)`);
+          }
+        } catch (err) {
+          console.warn("[memory-graph] Session summary failed:", err.message);
+        }
       },
       { priority: 10 }
     );
