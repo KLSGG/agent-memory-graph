@@ -2,6 +2,14 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.4.1] - 2026-05-23
+
+### Fixed
+- Prompt injection relevance: prioritize Project > Person > Platform > Organization entities, skip Tool/Concept/File/Award types.
+- Sort injected entities by priority type + relationship count (most connected = most important).
+- Fetch 15 results from search (up from 5) to have more candidates after filtering.
+- Fallback logic now fetches 30 recent entities and filters/sorts by priority.
+
 ## [0.4.0] - 2026-05-23
 
 ### Added

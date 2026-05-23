@@ -5781,24 +5781,40 @@ var entry_default = definePluginEntry({
         if (config?.promptInjection === false) return;
         try {
           const graph = await getGraph(config);
-          const prompt = event.prompt || "";
           const stats = graph.stats();
           if (stats.entities === 0) return;
+          const prompt = event.prompt || "";
           let contextLines = [];
-          if (prompt && prompt.length > 10) {
-            const searchTerms = prompt.slice(0, 200);
-            const results = graph.search(searchTerms, 5);
+          const PRIORITY_TYPES = ["Project", "Person", "Platform", "Organization", "Company", "Event", "System"];
+          const SKIP_TYPES = ["Tool", "Concept", "File", "Award"];
+          if (prompt && prompt.length > 20) {
+            const searchQuery = prompt.slice(0, 100).replace(/[\n\r]+/g, " ").trim();
+            const results = graph.search(searchQuery, 15);
             if (results.length > 0) {
-              contextLines = results.map((r) => {
-                const rels = r.relations?.slice(0, 3).map((rel) => `${rel.relation} ${rel.target}`).join(", ") || "";
-                return `${r.entity.name} (${r.entity.type})${rels ? ": " + rels : ""}`;
-              });
+              const filtered = results.filter((r) => !SKIP_TYPES.includes(r.entity.type)).sort((a, b) => {
+                const aPriority = PRIORITY_TYPES.indexOf(a.entity.type);
+                const bPriority = PRIORITY_TYPES.indexOf(b.entity.type);
+                const aScore = (aPriority >= 0 ? 100 - aPriority : 50) + (a.relations?.length || 0);
+                const bScore = (bPriority >= 0 ? 100 - bPriority : 50) + (b.relations?.length || 0);
+                return bScore - aScore;
+              }).slice(0, 5);
+              if (filtered.length > 0) {
+                contextLines = filtered.map((r) => {
+                  const rels = r.relations?.filter((rel) => !SKIP_TYPES.includes(rel.targetType || "")).slice(0, 3).map((rel) => `${rel.direction === "outgoing" ? "\u2192" : "\u2190"} ${rel.relation} ${rel.target}`).join(", ") || "";
+                  return `${r.entity.name} (${r.entity.type})${rels ? ": " + rels : ""}`;
+                });
+              }
             }
           }
           if (contextLines.length === 0) {
-            const recentEntities = graph.listEntities({ limit: 5, sortBy: "updated_at" });
-            if (recentEntities.length > 0) {
-              contextLines = recentEntities.map((e) => `${e.name} (${e.type})`);
+            const allEntities = graph.listEntities({ limit: 30, sortBy: "updated_at" });
+            const prioritized = allEntities.filter((e) => !SKIP_TYPES.includes(e.type)).sort((a, b) => {
+              const aPriority = PRIORITY_TYPES.indexOf(a.type);
+              const bPriority = PRIORITY_TYPES.indexOf(b.type);
+              return (bPriority >= 0 ? bPriority : -1) - (aPriority >= 0 ? aPriority : -1);
+            }).slice(0, 5);
+            if (prioritized.length > 0) {
+              contextLines = prioritized.map((e) => `${e.name} (${e.type})`);
             }
           }
           if (contextLines.length === 0) return;

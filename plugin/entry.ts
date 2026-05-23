@@ -139,35 +139,62 @@ export default definePluginEntry({
 
         try {
           const graph = await getGraph(config);
-          const prompt = (event as any).prompt || "";
           
-          // Get recent entities (last 24h) for general context
+          // Get stats first — skip if graph is empty
           const stats = graph.stats();
           if (stats.entities === 0) return;
 
-          // Search graph for entities relevant to current prompt
+          const prompt = (event as any).prompt || "";
           let contextLines: string[] = [];
           
-          if (prompt && prompt.length > 10) {
-            // Extract key terms from prompt and search graph
-            const searchTerms = prompt.slice(0, 200);
-            const results = graph.search(searchTerms, 5);
+          // Priority entity types (most useful for context recall)
+          const PRIORITY_TYPES = ['Project', 'Person', 'Platform', 'Organization', 'Company', 'Event', 'System'];
+          const SKIP_TYPES = ['Tool', 'Concept', 'File', 'Award'];
+          
+          // Search graph for entities relevant to current prompt
+          if (prompt && prompt.length > 20) {
+            const searchQuery = prompt.slice(0, 100).replace(/[\n\r]+/g, ' ').trim();
+            const results = graph.search(searchQuery, 15); // Get more results to filter from
             if (results.length > 0) {
-              contextLines = results.map((r: any) => {
-                const rels = r.relations
-                  ?.slice(0, 3)
-                  .map((rel: any) => `${rel.relation} ${rel.target}`)
-                  .join(', ') || '';
-                return `${r.entity.name} (${r.entity.type})${rels ? ': ' + rels : ''}`;
-              });
+              const filtered = results
+                .filter((r: any) => !SKIP_TYPES.includes(r.entity.type))
+                .sort((a: any, b: any) => {
+                  // Sort by priority type first, then by relationship count
+                  const aPriority = PRIORITY_TYPES.indexOf(a.entity.type);
+                  const bPriority = PRIORITY_TYPES.indexOf(b.entity.type);
+                  const aScore = (aPriority >= 0 ? 100 - aPriority : 50) + (a.relations?.length || 0);
+                  const bScore = (bPriority >= 0 ? 100 - bPriority : 50) + (b.relations?.length || 0);
+                  return bScore - aScore;
+                })
+                .slice(0, 5);
+              
+              if (filtered.length > 0) {
+                contextLines = filtered.map((r: any) => {
+                  const rels = r.relations
+                    ?.filter((rel: any) => !SKIP_TYPES.includes(rel.targetType || ''))
+                    .slice(0, 3)
+                    .map((rel: any) => `${rel.direction === 'outgoing' ? '→' : '←'} ${rel.relation} ${rel.target}`)
+                    .join(', ') || '';
+                  return `${r.entity.name} (${r.entity.type})${rels ? ': ' + rels : ''}`;
+                });
+              }
             }
           }
 
-          // If no prompt-specific results, get most recent entities
+          // Fallback: get most connected non-skip entities
           if (contextLines.length === 0) {
-            const recentEntities = graph.listEntities({ limit: 5, sortBy: 'updated_at' });
-            if (recentEntities.length > 0) {
-              contextLines = recentEntities.map((e: any) => `${e.name} (${e.type})`);
+            const allEntities = graph.listEntities({ limit: 30, sortBy: 'updated_at' });
+            const prioritized = allEntities
+              .filter((e: any) => !SKIP_TYPES.includes(e.type))
+              .sort((a: any, b: any) => {
+                const aPriority = PRIORITY_TYPES.indexOf(a.type);
+                const bPriority = PRIORITY_TYPES.indexOf(b.type);
+                return (bPriority >= 0 ? bPriority : -1) - (aPriority >= 0 ? aPriority : -1);
+              })
+              .slice(0, 5);
+            
+            if (prioritized.length > 0) {
+              contextLines = prioritized.map((e: any) => `${e.name} (${e.type})`);
             }
           }
 
