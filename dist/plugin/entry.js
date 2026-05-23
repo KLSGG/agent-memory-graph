@@ -5856,31 +5856,87 @@ var MemoryGraph = class {
   }
 };
 
-// src/search/semantic.ts
-async function generateEmbedding(text, model = "text-embedding-3-small") {
-  const { default: OpenAI } = await import("openai");
-  const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || "sk-local",
-    baseURL: process.env.OPENAI_BASE_URL || "http://127.0.0.1:20128/v1"
-  });
-  const response = await client.embeddings.create({
-    model,
-    input: text
-  });
-  return response.data[0].embedding;
+// src/search/local-embed.ts
+var VECTOR_DIM = 256;
+function localEmbed(text) {
+  const normalized = text.toLowerCase().trim();
+  const vector = new Float64Array(VECTOR_DIM);
+  if (normalized.length === 0) return Array.from(vector);
+  const trigrams = /* @__PURE__ */ new Map();
+  for (let i = 0; i <= normalized.length - 3; i++) {
+    const tri = normalized.slice(i, i + 3);
+    trigrams.set(tri, (trigrams.get(tri) || 0) + 1);
+  }
+  const words = normalized.split(/\s+/).filter((w) => w.length > 1);
+  for (const word of words) {
+    const hash = simpleHash(word);
+    vector[hash % VECTOR_DIM] += 2;
+  }
+  for (let i = 0; i < words.length - 1; i++) {
+    const bigram = `${words[i]} ${words[i + 1]}`;
+    const hash = simpleHash(bigram);
+    vector[hash % VECTOR_DIM] += 1.5;
+  }
+  for (const [tri, count] of trigrams) {
+    const hash = simpleHash(tri);
+    const idx = hash % VECTOR_DIM;
+    vector[idx] += count;
+    const idx2 = (hash * 31 + 7) % VECTOR_DIM;
+    vector[idx2] += count * 0.5;
+  }
+  let norm = 0;
+  for (let i = 0; i < VECTOR_DIM; i++) {
+    norm += vector[i] * vector[i];
+  }
+  norm = Math.sqrt(norm);
+  if (norm > 0) {
+    for (let i = 0; i < VECTOR_DIM; i++) {
+      vector[i] /= norm;
+    }
+  }
+  return Array.from(vector);
 }
-function cosineSimilarity(a, b) {
+function simpleHash(str) {
+  let hash = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash);
+}
+function localCosineSimilarity(a, b) {
   if (a.length !== b.length) return 0;
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
+  let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
+    dot += a[i] * b[i];
     normA += a[i] * a[i];
     normB += b[i] * b[i];
   }
-  const denominator = Math.sqrt(normA) * Math.sqrt(normB);
-  return denominator === 0 ? 0 : dotProduct / denominator;
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+var LOCAL_MODEL_NAME = "local-ngram-256d";
+
+// src/search/semantic.ts
+async function generateEmbedding(text, model = "text-embedding-3-small") {
+  if (model === LOCAL_MODEL_NAME || model === "local") {
+    return localEmbed(text);
+  }
+  try {
+    const { default: OpenAI } = await import("openai");
+    const client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY || "sk-local",
+      baseURL: process.env.OPENAI_BASE_URL || "http://127.0.0.1:20128/v1"
+    });
+    const response = await client.embeddings.create({
+      model,
+      input: text
+    });
+    return response.data[0].embedding;
+  } catch (err) {
+    console.warn("[memory-graph] API embedding failed, using local fallback:", err.message);
+    return localEmbed(text);
+  }
 }
 function storeEmbedding(db, entityId, vector, model) {
   const id = `emb-${entityId}`;
@@ -5890,7 +5946,7 @@ function storeEmbedding(db, entityId, vector, model) {
   `).run(id, entityId, JSON.stringify(vector), model);
 }
 async function semanticSearch(db, query, options = {}) {
-  const { limit = 10, minSimilarity = 0.3, model = "text-embedding-3-small" } = options;
+  const { limit = 10, minSimilarity = 0.3, model = LOCAL_MODEL_NAME } = options;
   let queryVector;
   try {
     queryVector = await generateEmbedding(query, model);
@@ -5908,7 +5964,7 @@ async function semanticSearch(db, query, options = {}) {
   const results = [];
   for (const row of rows) {
     const storedVector = JSON.parse(row.vector);
-    const similarity = cosineSimilarity(queryVector, storedVector);
+    const similarity = localCosineSimilarity(queryVector, storedVector);
     if (similarity >= minSimilarity) {
       results.push({
         entity_id: row.entity_id,
@@ -5922,7 +5978,7 @@ async function semanticSearch(db, query, options = {}) {
   return results.slice(0, limit);
 }
 async function embedMissingEntities(db, options = {}) {
-  const { model = "text-embedding-3-small", batchSize = 20 } = options;
+  const { model = LOCAL_MODEL_NAME, batchSize = 20 } = options;
   const missing = db.prepare(`
     SELECT e.id, e.name, e.type, e.properties
     FROM entities e

@@ -1,6 +1,6 @@
 /**
  * Semantic/vector search for the knowledge graph.
- * Uses OpenAI-compatible embeddings API (works with local 9router, OpenAI, etc.)
+ * Uses OpenAI-compatible embeddings API when available, falls back to local n-gram embeddings.
  * Stores embeddings in SQLite as JSON arrays, computes cosine similarity in JS.
  * Lightweight approach — no external vector DB needed.
  */
@@ -19,7 +19,7 @@ export interface SemanticSearchResult {
     similarity: number;
 }
 /**
- * Generate embedding for text using OpenAI-compatible API.
+ * Generate embedding for text using OpenAI-compatible API, with local fallback.
  */
 export declare function generateEmbedding(text: string, model?: string): Promise<number[]>;
 /**
@@ -45,7 +45,7 @@ export declare function semanticSearch(db: Database.Database, query: string, opt
 }): Promise<SemanticSearchResult[]>;
 /**
  * Batch embed all entities that don't have embeddings yet.
- * Call this periodically or after bulk ingestion.
+ * Uses local embedding by default (no API needed).
  */
 export declare function embedMissingEntities(db: Database.Database, options?: {
     model?: string;

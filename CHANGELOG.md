@@ -2,6 +2,19 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.8.0] - 2026-05-23
+
+### Added
+- **Local embedding fallback** — zero-API semantic search using character n-gram hashing + TF normalization. Works offline, no OpenAI key needed. 256-dimension vectors with cosine similarity.
+- Quality: Bitcoin↔Ethereum similarity 0.80, Bitcoin↔Apple 0.13 (good discrimination).
+- Automatic fallback: tries OpenAI-compatible API first, falls back to local if unavailable.
+- New module: `src/search/local-embed.ts`
+
+### Changed
+- Default embedding model changed from `text-embedding-3-small` to `local-ngram-256d` (zero-config).
+- `memory_graph_embed` now works without any external API.
+- `memory_graph_semantic_search` uses local cosine similarity by default.
+
 ## [0.7.1] - 2026-05-23
 
 ### Fixed

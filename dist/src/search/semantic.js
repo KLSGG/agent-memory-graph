@@ -1,23 +1,36 @@
 /**
  * Semantic/vector search for the knowledge graph.
- * Uses OpenAI-compatible embeddings API (works with local 9router, OpenAI, etc.)
+ * Uses OpenAI-compatible embeddings API when available, falls back to local n-gram embeddings.
  * Stores embeddings in SQLite as JSON arrays, computes cosine similarity in JS.
  * Lightweight approach — no external vector DB needed.
  */
+import { localEmbed, localCosineSimilarity, LOCAL_MODEL_NAME } from './local-embed.js';
 /**
- * Generate embedding for text using OpenAI-compatible API.
+ * Generate embedding for text using OpenAI-compatible API, with local fallback.
  */
 export async function generateEmbedding(text, model = 'text-embedding-3-small') {
-    const { default: OpenAI } = await import('openai');
-    const client = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY || 'sk-local',
-        baseURL: process.env.OPENAI_BASE_URL || 'http://127.0.0.1:20128/v1',
-    });
-    const response = await client.embeddings.create({
-        model,
-        input: text,
-    });
-    return response.data[0].embedding;
+    // If model is local, use local embedding directly
+    if (model === LOCAL_MODEL_NAME || model === 'local') {
+        return localEmbed(text);
+    }
+    // Try OpenAI-compatible API first
+    try {
+        const { default: OpenAI } = await import('openai');
+        const client = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY || 'sk-local',
+            baseURL: process.env.OPENAI_BASE_URL || 'http://127.0.0.1:20128/v1',
+        });
+        const response = await client.embeddings.create({
+            model,
+            input: text,
+        });
+        return response.data[0].embedding;
+    }
+    catch (err) {
+        // Fallback to local embedding
+        console.warn('[memory-graph] API embedding failed, using local fallback:', err.message);
+        return localEmbed(text);
+    }
 }
 /**
  * Cosine similarity between two vectors.
@@ -61,14 +74,14 @@ export function getEmbedding(db, entityId) {
  * Generates embedding for query, then compares against all stored embeddings.
  */
 export async function semanticSearch(db, query, options = {}) {
-    const { limit = 10, minSimilarity = 0.3, model = 'text-embedding-3-small' } = options;
+    const { limit = 10, minSimilarity = 0.3, model = LOCAL_MODEL_NAME } = options;
     // Generate query embedding
     let queryVector;
     try {
         queryVector = await generateEmbedding(query, model);
     }
     catch (err) {
-        // If embedding fails (no API, model not available), return empty
+        // If embedding fails completely, return empty
         console.warn('[memory-graph] Embedding generation failed:', err.message);
         return [];
     }
@@ -85,7 +98,7 @@ export async function semanticSearch(db, query, options = {}) {
     const results = [];
     for (const row of rows) {
         const storedVector = JSON.parse(row.vector);
-        const similarity = cosineSimilarity(queryVector, storedVector);
+        const similarity = localCosineSimilarity(queryVector, storedVector);
         if (similarity >= minSimilarity) {
             results.push({
                 entity_id: row.entity_id,
@@ -101,10 +114,10 @@ export async function semanticSearch(db, query, options = {}) {
 }
 /**
  * Batch embed all entities that don't have embeddings yet.
- * Call this periodically or after bulk ingestion.
+ * Uses local embedding by default (no API needed).
  */
 export async function embedMissingEntities(db, options = {}) {
-    const { model = 'text-embedding-3-small', batchSize = 20 } = options;
+    const { model = LOCAL_MODEL_NAME, batchSize = 20 } = options;
     // Find entities without embeddings
     const missing = db.prepare(`
     SELECT e.id, e.name, e.type, e.properties
