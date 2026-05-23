@@ -1,6 +1,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
+import { MemoryGraph } from "../src/index.js";
 
 // LLM provider env: user can set OPENAI_API_KEY + OPENAI_BASE_URL for any OpenAI-compatible provider.
 // Defaults to local 9router if nothing is set (works out of the box for OpenClaw users with 9router).
@@ -29,7 +30,6 @@ function getDbPath(config: any): string {
 
 async function getGraph(config: any) {
   if (!graphInstance) {
-    const { MemoryGraph } = await import("../src/index.js");
     graphInstance = new MemoryGraph({
       path: getDbPath(config),
       config: {

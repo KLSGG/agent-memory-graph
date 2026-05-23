@@ -2,6 +2,13 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.5.1] - 2026-05-23
+
+### Fixed
+- Schema migration v2→v3: SQLite does not support `DEFAULT (expression)` in ALTER TABLE. Changed `valid_from` and `last_accessed` column additions to use no default (value set in application code instead).
+- Removed stale `.js` files from `src/` that caused esbuild to bundle old code without `getEngine()` method.
+- Static import of MemoryGraph in plugin entry (was dynamic import that esbuild couldn't bundle).
+
 ## [0.5.0] - 2026-05-23
 
 ### Added

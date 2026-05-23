@@ -116,7 +116,7 @@ export class SchemaManager {
     if (currentVersion < 3) {
       // v2 → v3: Add temporal validity + lifecycle
       try {
-        this.db.exec(`ALTER TABLE relationships ADD COLUMN valid_from TEXT DEFAULT (datetime('now'))`);
+        this.db.exec(`ALTER TABLE relationships ADD COLUMN valid_from TEXT`);
       } catch (_) { /* column already exists */ }
       try {
         this.db.exec(`ALTER TABLE relationships ADD COLUMN valid_until TEXT`);
@@ -128,7 +128,7 @@ export class SchemaManager {
         this.db.exec(`ALTER TABLE entities ADD COLUMN lifecycle TEXT DEFAULT 'active'`);
       } catch (_) { /* column already exists */ }
       try {
-        this.db.exec(`ALTER TABLE entities ADD COLUMN last_accessed TEXT DEFAULT (datetime('now'))`);
+        this.db.exec(`ALTER TABLE entities ADD COLUMN last_accessed TEXT`);
       } catch (_) { /* column already exists */ }
       // Index for temporal queries
       try {
