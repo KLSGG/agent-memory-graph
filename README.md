@@ -45,14 +45,19 @@ You: "How is Viktor connected to Rust?"
 
 | Feature | Description |
 |---------|-------------|
-| 🧠 **Auto-extraction** | LLM extracts entities & relationships from any text |
+| 🧠 **Auto-extraction** | Hybrid: local rule-based + LLM fallback for complex text |
+| 🏠 **Zero-API mode** | Works fully offline — local extraction + local embeddings |
 | 🗣️ **Natural language queries** | Ask questions like "Who works at X?" or "What does Y use?" |
 | 🔗 **Path finding** | Discover hidden connections between entities (BFS, up to 5 hops) |
+| 🔍 **Semantic search** | Local n-gram embeddings (256d) — no OpenAI key needed |
 | 📦 **Single SQLite file** | Zero external deps, fully portable, survives restarts |
 | 🌐 **Domain-agnostic** | Software, crypto, research, CRM, notes — anything |
-| ⚡ **Zero-config** | Works out of the box with any OpenAI-compatible LLM |
-| 🔌 **OpenClaw plugin** | Auto-ingests every conversation, registers query tools |
-| 🔍 **Full-text search** | SQLite FTS5 for fast keyword search |
+| ⚡ **Zero-config** | Works out of the box with zero API keys |
+| 🔌 **OpenClaw plugin** | Auto-ingests every conversation, registers 11 tools |
+| 🕐 **Temporal facts** | Graphiti-inspired: facts have valid_from/valid_until, never deleted |
+| 📉 **Confidence decay** | Unused entities/relations lose confidence over time |
+| 🧹 **Relation normalization** | Synonyms merged, vague relations rejected automatically |
+| 🖥️ **MCP server** | Compatible with Claude Code, Cursor, Gemini CLI |
 | 📊 **Export** | Mermaid, DOT, JSON, CSV for visualization |
 
 ---
@@ -61,7 +66,8 @@ You: "How is Viktor connected to Rust?"
 
 - **Node.js 18–22** (recommended) — `better-sqlite3` has prebuilt binaries
 - **Node.js 24** — works but requires build tools (`gcc`, `make`, `python3`) for native compilation
-- **Any OpenAI-compatible LLM** — for entity extraction (optional for manual operations)
+- **No API key required** — works fully offline with local extraction + local embeddings
+- **Optional: Any OpenAI-compatible LLM** — for higher-quality extraction in hybrid/llm mode
 
 ---
 
@@ -140,12 +146,18 @@ openclaw gateway restart
 ### What happens next
 
 1. **Every message** (>20 chars) is auto-ingested into the knowledge graph
-2. **5 tools** are registered for the agent to call:
+2. **11 tools** are registered for the agent to call:
    - `memory_graph_ingest` — manually add knowledge
    - `memory_graph_query` — natural language questions
    - `memory_graph_search` — keyword search
    - `memory_graph_path` — find connections between entities
    - `memory_graph_stats` — graph statistics
+   - `memory_graph_temporal` — query facts at a point in time
+   - `memory_graph_supersede` — update facts (old → new)
+   - `memory_graph_decay` — apply confidence decay
+   - `memory_graph_embed` — generate embeddings for semantic search
+   - `memory_graph_semantic_search` — find similar entities by meaning
+   - `memory_graph_dedup_relations` — clean up duplicate/vague relations
 3. **Data persists** in `~/.openclaw/data/memory-graph.db` — survives `/new`, `/reset`, and restarts
 
 ### Demo: Auto-detect in action
@@ -182,6 +194,7 @@ openclaw gateway restart
         "config": {
           "autoIngest": true,
           "extractionModel": "gpt-4o-mini",
+          "extractionMode": "hybrid",
           "dbPath": "~/.openclaw/data/memory-graph.db",
           "maxHops": 5,
           "minConfidence": 0.7
@@ -191,6 +204,14 @@ openclaw gateway restart
   }
 }
 ```
+
+**Extraction modes:**
+
+| Mode | API Cost | Quality | When to use |
+|------|----------|---------|-------------|
+| `"local"` | **Zero** | Good for simple text | No API key, offline, cost-sensitive |
+| `"hybrid"` (default) | **~70-80% less** | Best balance | Most users — local first, LLM for complex text |
+| `"llm"` | Full | Highest | When accuracy is critical and you have API budget |
 
 Set `autoIngest: false` to disable auto-ingestion and only use manual tool calls.
 
@@ -243,6 +264,53 @@ graph LR
 
 ---
 
+## 🏠 Zero-API Mode (Fully Offline)
+
+No API key? No problem. The plugin works completely offline:
+
+```bash
+# No environment variables needed!
+openclaw plugins install agent-memory-graph --dangerously-force-unsafe-install
+openclaw gateway restart
+# That's it. Everything works.
+```
+
+**What works offline:**
+- ✅ Entity extraction (rule-based pattern matching)
+- ✅ Relationship detection (grammar patterns: "X works at Y", "X built Y", etc.)
+- ✅ Semantic search (local n-gram embeddings, 256 dimensions)
+- ✅ All graph operations (search, path, temporal, supersede, decay, dedup)
+- ✅ Auto-ingestion from conversations
+
+**What needs an API (optional):**
+- LLM extraction for complex/ambiguous text (hybrid mode fallback)
+- Higher-dimensional embeddings (text-embedding-3-small via OpenAI)
+
+### How local extraction works
+
+The rule-based extractor uses:
+1. **Named Entity Recognition** — capitalized words, type indicator patterns ("CEO of X", "built Y")
+2. **Relationship patterns** — 11 grammar templates (WORKS_AT, BUILDS, USES, LOCATED_IN, SUPPORTS, etc.)
+3. **Relation normalization** — synonyms merged (CREATED/DEVELOPED/AUTHORED → BUILDS)
+4. **Vague relation rejection** — RELATED_TO, ASSOCIATED_WITH, etc. are filtered out
+5. **Confidence scoring** — local results get 0.5-0.7 confidence (vs 0.8-1.0 for LLM)
+
+### How local embeddings work
+
+Instead of calling OpenAI's embedding API, we generate 256-dimensional vectors locally:
+1. **Character trigrams** — "hello" → ["hel", "ell", "llo"]
+2. **Word unigrams + bigrams** — "hello world" → ["hello", "world", "hello world"]
+3. **FNV-1a hashing** — each n-gram hashed to a vector position
+4. **TF normalization** — frequency-weighted, L2-normalized output
+5. **Cosine similarity** — compare vectors in JS (no pgvector needed)
+
+Quality benchmarks:
+- Bitcoin ↔ Ethereum: **0.80** similarity (related concepts)
+- Bitcoin ↔ Apple fruit: **0.13** similarity (unrelated)
+- "AI agent memory" → finds "agent memory" entity at **67.5%** match
+
+---
+
 ## ⚙️ Configuration
 
 ### LLM Provider
@@ -291,24 +359,47 @@ Improve extraction accuracy for your specific domain:
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│            MemoryGraph API                   │
-├─────────────────────────────────────────────┤
-│  Ingest  │  Query   │  Search  │  Export    │
-├──────────┼──────────┼──────────┼───────────┤
-│ LLM      │ NL Query │ FTS5     │ Mermaid   │
-│ Extractor│ Engine   │ Hybrid   │ DOT/JSON  │
-├──────────┴──────────┴──────────┴───────────┤
-│         GraphEngine (SQLite + WAL)          │
-│  Entities │ Relationships │ FTS5 Index      │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                  MemoryGraph API                       │
+├─────────────────────────────────────────────────────────┤
+│  Ingest  │  Query  │  Search  │  Temporal  │  Export  │
+├──────────┼─────────┼──────────┼────────────┼─────────┤
+│ Hybrid   │ NL      │ Keyword  │ Supersede  │ Mermaid │
+│ Extract  │ Query   │ + FTS5   │ + Decay    │ DOT/CSV │
+│          │ Engine  │ + Vector │ + Temporal │         │
+├──────────┴─────────┴──────────┴────────────┴─────────┤
+│  ┌─────────────────────────────────────────────────────┐  │
+│  │  Extraction Layer                                    │  │
+│  │  ┌─────────────────┐  ┌────────────────────────────┐  │  │
+│  │  │ Local (free)    │  │ LLM (fallback, optional)   │  │  │
+│  │  │ Rule-based NER  │  │ OpenAI / Anthropic / Ollama│  │  │
+│  │  │ Pattern match   │  │ High-quality extraction    │  │  │
+│  │  └─────────────────┘  └────────────────────────────┘  │  │
+│  └─────────────────────────────────────────────────────┘  │
+│  ┌─────────────────────────────────────────────────────┐  │
+│  │  Embedding Layer                                     │  │
+│  │  ┌─────────────────┐  ┌────────────────────────────┐  │  │
+│  │  │ Local (free)    │  │ API (optional, higher-dim) │  │  │
+│  │  │ N-gram 256d    │  │ text-embedding-3-small     │  │  │
+│  │  │ Cosine in JS   │  │ 1536d, better quality      │  │  │
+│  │  └─────────────────┘  └────────────────────────────┘  │  │
+│  └─────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────┤
+│  GraphEngine (SQLite + WAL + FTS5)                      │
+│  Entities │ Relationships │ Embeddings │ FTS5 Index     │
+└─────────────────────────────────────────────────────────┘
 ```
 
-- **SQLite** — Single file, WAL mode, FTS5 full-text search
-- **LLM extraction** — Any OpenAI-compatible provider
+- **SQLite** — Single file, WAL mode, FTS5 full-text search, schema v4
+- **Hybrid extraction** — Local rule-based (free) + LLM fallback (optional)
+- **Local embeddings** — N-gram 256d vectors, cosine similarity in JS
 - **NL Query Engine** — 12+ regex patterns + smart entity-name fallback
 - **Graph traversal** — BFS pathfinding up to 5 hops
-- **Deduplication** — Levenshtein-based entity merging
+- **Temporal facts** — valid_from/valid_until, supersession, never-delete
+- **Confidence decay** — Unused facts lose confidence (min 0.1)
+- **Relation normalization** — Synonyms merged, vague relations rejected
+- **Deduplication** — Levenshtein-based entity merging + relation dedup
+- **MCP server** — stdio protocol for Claude Code, Cursor, Gemini CLI
 - **Persistence** — Survives process restarts, session resets, and agent reboots
 
 ---

@@ -2,6 +2,15 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.9.1] - 2026-05-23
+
+### Fixed
+- Local extraction regex: reduced greedy matching (Tool, Location, Company patterns)
+- Added word-count limit (max 4 words) for extracted entity names
+- Added Vietnamese stop words (Khi, Nếu, Với, etc.) to filter
+- `needsLLMExtraction` now correctly triggers for non-Latin text and complex English
+- DeFi/abstract text now properly routes to LLM in hybrid mode
+
 ## [0.9.0] - 2026-05-23
 
 ### Added

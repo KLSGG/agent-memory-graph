@@ -27,10 +27,10 @@ const TYPE_INDICATORS: Record<string, RegExp[]> = {
     /(?:built|created|launched|released|published)\s+([A-Z][\w-]+)(?:\s|\.|,|$)/gi,
   ],
   Tool: [
-    /(?:using|uses|with|via)\s+([A-Z][\w-]+(?:\s+[A-Z][\w-]+)*)/gi,
+    /(?:using|uses|with|via)\s+([A-Z][\w-]+)/gi,
   ],
   Location: [
-    /(?:in|at|from|based in)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*(?:,|\.|$)/gi,
+    /(?:based in|headquartered in|located in)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi,
   ],
 };
 
@@ -47,7 +47,7 @@ interface RelationPattern {
 
 const RELATION_PATTERNS: RelationPattern[] = [
   // X works at/for Y
-  { pattern: /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+(?:works?\s+(?:at|for)|joined|is\s+at)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi, relation: 'WORKS_AT', fromGroup: 1, toGroup: 2, fromType: 'Person', toType: 'Company' },
+  { pattern: /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:works?\s+(?:at|for)|joined|is\s+at)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi, relation: 'WORKS_AT', fromGroup: 1, toGroup: 2, fromType: 'Person', toType: 'Company' },
   // X created/built/developed Y
   { pattern: /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:created|built|developed|authored|wrote|designed|founded)\s+([A-Z][\w][\w-]*)(?:\s|\.|,|$)/gi, relation: 'BUILDS', fromGroup: 1, toGroup: 2, fromType: 'Person', toType: 'Project' },
   // X uses Y (stop at conjunctions/punctuation)
@@ -59,13 +59,13 @@ const RELATION_PATTERNS: RelationPattern[] = [
   // X located/based in Y
   { pattern: /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:is\s+)?(?:located|based|headquartered)\s+in\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi, relation: 'LOCATED_IN', fromGroup: 1, toGroup: 2, fromType: 'Company', toType: 'Location' },
   // X leads/manages Y
-  { pattern: /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+(?:leads|manages|heads|directs)\s+([A-Z][\w]+(?:\s+[\w]+)*)/gi, relation: 'LEADS', fromGroup: 1, toGroup: 2, fromType: 'Person' },
+  { pattern: /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+(?:leads|manages|heads|directs)\s+([A-Z][\w-]+)/gi, relation: 'LEADS', fromGroup: 1, toGroup: 2, fromType: 'Person' },
   // X supports/integrates with Y
-  { pattern: /([A-Z][\w-]+)\s+(?:supports|integrates\s+with|compatible\s+with)\s+([A-Z][\w-]+(?:\s+[\w-]+)*)/gi, relation: 'SUPPORTS', fromGroup: 1, toGroup: 2 },
+  { pattern: /([A-Z][\w-]+)\s+(?:supports|integrates\s+with|compatible\s+with)\s+([A-Z][\w-]+)/gi, relation: 'SUPPORTS', fromGroup: 1, toGroup: 2 },
   // X replaces/alternative to Y
   { pattern: /([A-Z][\w-]+)\s+(?:replaces|is\s+an?\s+alternative\s+to)\s+([A-Z][\w-]+)/gi, relation: 'REPLACES', fromGroup: 1, toGroup: 2 },
   // X invested in / funded Y
-  { pattern: /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:invested\s+in|funded|backed)\s+([A-Z][\w]+(?:\s+[\w]+)*)/gi, relation: 'INVESTED_IN', fromGroup: 1, toGroup: 2, fromType: 'Company', toType: 'Project' },
+  { pattern: /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:invested\s+in|funded|backed)\s+([A-Z][\w-]+)/gi, relation: 'INVESTED_IN', fromGroup: 1, toGroup: 2, fromType: 'Company', toType: 'Project' },
   // X owns Y
   { pattern: /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:owns|acquired)\s+([A-Z][\w]+(?:\s+[\w]+)*)/gi, relation: 'OWNS', fromGroup: 1, toGroup: 2 },
 ];
@@ -82,6 +82,9 @@ const STOP_ENTITIES = new Set([
   'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
+  'After', 'Before', 'During', 'Since', 'Until', 'While',
+  'Also', 'However', 'Therefore', 'Furthermore', 'Moreover',
+  'Khi', 'Nếu', 'Với', 'Theo', 'Trong', 'Từ', 'Cho', 'Của',
 ]);
 
 // ─── Main Extraction Function ───────────────────────────────────
@@ -101,8 +104,12 @@ export function localExtract(text: string): ExtractionResult {
       let match;
       while ((match = pattern.exec(text)) !== null) {
         const name = (match[2] || match[1]).trim();
-        if (name.length >= 2 && !STOP_ENTITIES.has(name)) {
-          entities.set(name.toLowerCase(), { name, type, properties: {}, confidence: 0.7 });
+        if (name.length >= 2 && name.length <= 50 && !STOP_ENTITIES.has(name) && !/^\w+$/.test(name) === false) {
+          // Skip if name has more than 4 words (likely greedy match)
+          const wordCount = name.split(/\s+/).length;
+          if (wordCount <= 4) {
+            entities.set(name.toLowerCase(), { name, type, properties: {}, confidence: 0.7 });
+          }
         }
       }
     }
@@ -161,21 +168,25 @@ export function localExtract(text: string): ExtractionResult {
  * Used in hybrid mode to decide when to call LLM vs use local only.
  */
 export function needsLLMExtraction(text: string, localResult: ExtractionResult): boolean {
-  // Short text with good local results → skip LLM
-  if (text.length < 100 && localResult.entities.length > 0) return false;
-  
   // Very short text → skip LLM regardless
-  if (text.length < 50) return false;
+  if (text.length < 80) return false;
   
-  // Long text with few local results → needs LLM
-  if (text.length > 200 && localResult.entities.length < 2) return true;
+  // Short text with good local results → skip LLM
+  if (text.length < 150 && localResult.entities.length > 0) return false;
+  
+  // Long text with few/no local results → needs LLM
+  if (text.length > 150 && localResult.entities.length < 2 && localResult.relationships.length === 0) return true;
   
   // Complex sentences (multiple clauses) with no relations found → needs LLM
   const clauseCount = (text.match(/[,;:]/g) || []).length;
-  if (clauseCount > 3 && localResult.relationships.length === 0) return true;
+  if (clauseCount > 2 && localResult.relationships.length === 0 && localResult.entities.length < 3) return true;
   
   // Many proper nouns but no relations → needs LLM to find connections
-  if (localResult.entities.length > 3 && localResult.relationships.length === 0) return true;
+  if (localResult.entities.length > 4 && localResult.relationships.length === 0) return true;
+  
+  // Non-Latin text (Vietnamese, Chinese, etc.) with no meaningful results → needs LLM
+  const hasNonLatin = /[^\x00-\x7F]/.test(text);
+  if (hasNonLatin && localResult.entities.length <= 1 && text.length > 50) return true;
   
   // Default: local is sufficient
   return false;
