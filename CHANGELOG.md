@@ -2,6 +2,19 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.7.0] - 2026-05-23
+
+### Added
+- **Semantic/vector search** (Hermes/MinnsDB-inspired) — embedding-based similarity search for entities. Uses OpenAI-compatible embeddings API. New tools: `memory_graph_semantic_search`, `memory_graph_embed`.
+- **MCP server** (agentmemory-inspired) — stdio MCP protocol server so external clients (Claude Code, Cursor, Gemini CLI, etc.) can query the knowledge graph. Binary: `memory-graph-mcp`.
+- **Relation dedup tool** — `memory_graph_dedup_relations` normalizes existing relations to canonical forms, removes vague relations, and merges duplicates. Run once after upgrade.
+- Embeddings table in schema (v4 migration).
+- `getDb()` method on MemoryGraph for direct DB access.
+
+### Changed
+- GraphEngine.db is now public (needed for semantic search and dedup access).
+- Schema version bumped to 4.
+
 ## [0.6.0] - 2026-05-23
 
 ### Added

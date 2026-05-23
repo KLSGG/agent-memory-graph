@@ -122,6 +122,10 @@ export declare class MemoryGraph {
      */
     getEngine(): GraphEngine;
     /**
+     * Get raw database handle (for semantic search and advanced queries).
+     */
+    getDb(): any;
+    /**
      * Close database connection.
      */
     close(): void;

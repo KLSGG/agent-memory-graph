@@ -185,6 +185,12 @@ export class MemoryGraph {
         return this.engine;
     }
     /**
+     * Get raw database handle (for semantic search and advanced queries).
+     */
+    getDb() {
+        return this.engine.db;
+    }
+    /**
      * Close database connection.
      */
     close() {

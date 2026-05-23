@@ -44,7 +44,7 @@ export interface GraphStats {
 }
 
 export class GraphEngine {
-  private db: Database.Database;
+  public db: Database.Database;
 
   constructor(dbPath: string) {
     const schema = new SchemaManager(dbPath);

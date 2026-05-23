@@ -44,7 +44,7 @@ function nanoid(size = 21) {
 import Database from "better-sqlite3";
 import { resolve } from "node:path";
 import { mkdirSync } from "node:fs";
-var SCHEMA_VERSION = 3;
+var SCHEMA_VERSION = 4;
 var SCHEMA_SQL = `
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS _meta (
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS entities (
   confidence REAL DEFAULT 1.0,
   mention_count INTEGER DEFAULT 1,
   lifecycle TEXT DEFAULT 'active',
-  last_accessed TEXT DEFAULT (datetime('now'))
+  last_accessed TEXT
 );
 
 -- Relationships (graph edges)
@@ -78,9 +78,18 @@ CREATE TABLE IF NOT EXISTS relationships (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   source TEXT,
   confidence REAL DEFAULT 1.0,
-  valid_from TEXT DEFAULT (datetime('now')),
+  valid_from TEXT,
   valid_until TEXT,
   lifecycle TEXT DEFAULT 'active'
+);
+
+-- Embeddings for semantic search
+CREATE TABLE IF NOT EXISTS embeddings (
+  id TEXT PRIMARY KEY,
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  vector TEXT NOT NULL,
+  model TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Memory log (audit trail of extractions)
@@ -172,6 +181,19 @@ var SchemaManager = class {
         this.db.exec(`CREATE INDEX IF NOT EXISTS idx_rel_valid ON relationships(valid_from, valid_until)`);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idx_rel_lifecycle ON relationships(lifecycle)`);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_lifecycle ON entities(lifecycle)`);
+      } catch (_) {
+      }
+    }
+    if (currentVersion < 4) {
+      try {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS embeddings (
+          id TEXT PRIMARY KEY,
+          entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+          vector TEXT NOT NULL,
+          model TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_embeddings_entity ON embeddings(entity_id)`);
       } catch (_) {
       }
     }
@@ -4857,6 +4879,14 @@ function normalizeRelation(relation) {
   }
   return RELATION_SYNONYMS[normalized] || normalized;
 }
+function isVagueRelation(relation) {
+  const normalized = relation.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return VAGUE_RELATIONS.has(normalized);
+}
+function getCanonicalRelation(relation) {
+  const normalized = relation.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return RELATION_SYNONYMS[normalized] || normalized;
+}
 
 // src/extract/extractor.ts
 function buildPrompt(text, domains) {
@@ -5813,12 +5843,168 @@ var MemoryGraph = class {
     return this.engine;
   }
   /**
+   * Get raw database handle (for semantic search and advanced queries).
+   */
+  getDb() {
+    return this.engine.db;
+  }
+  /**
    * Close database connection.
    */
   close() {
     this.engine.close();
   }
 };
+
+// src/search/semantic.ts
+async function generateEmbedding(text, model = "text-embedding-3-small") {
+  const { default: OpenAI } = await import("openai");
+  const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY || "sk-local",
+    baseURL: process.env.OPENAI_BASE_URL || "http://127.0.0.1:20128/v1"
+  });
+  const response = await client.embeddings.create({
+    model,
+    input: text
+  });
+  return response.data[0].embedding;
+}
+function cosineSimilarity(a, b) {
+  if (a.length !== b.length) return 0;
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+  return denominator === 0 ? 0 : dotProduct / denominator;
+}
+function storeEmbedding(db, entityId, vector, model) {
+  const id = `emb-${entityId}`;
+  db.prepare(`
+    INSERT OR REPLACE INTO embeddings (id, entity_id, vector, model, created_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+  `).run(id, entityId, JSON.stringify(vector), model);
+}
+async function semanticSearch(db, query, options = {}) {
+  const { limit = 10, minSimilarity = 0.3, model = "text-embedding-3-small" } = options;
+  let queryVector;
+  try {
+    queryVector = await generateEmbedding(query, model);
+  } catch (err) {
+    console.warn("[memory-graph] Embedding generation failed:", err.message);
+    return [];
+  }
+  const rows = db.prepare(`
+    SELECT e.id as entity_id, e.name as entity_name, e.type as entity_type, emb.vector
+    FROM embeddings emb
+    JOIN entities e ON emb.entity_id = e.id
+    WHERE e.lifecycle = 'active' OR e.lifecycle IS NULL
+  `).all();
+  if (rows.length === 0) return [];
+  const results = [];
+  for (const row of rows) {
+    const storedVector = JSON.parse(row.vector);
+    const similarity = cosineSimilarity(queryVector, storedVector);
+    if (similarity >= minSimilarity) {
+      results.push({
+        entity_id: row.entity_id,
+        entity_name: row.entity_name,
+        entity_type: row.entity_type,
+        similarity
+      });
+    }
+  }
+  results.sort((a, b) => b.similarity - a.similarity);
+  return results.slice(0, limit);
+}
+async function embedMissingEntities(db, options = {}) {
+  const { model = "text-embedding-3-small", batchSize = 20 } = options;
+  const missing = db.prepare(`
+    SELECT e.id, e.name, e.type, e.properties
+    FROM entities e
+    LEFT JOIN embeddings emb ON e.id = emb.entity_id
+    WHERE emb.id IS NULL AND (e.lifecycle = 'active' OR e.lifecycle IS NULL)
+    LIMIT ?
+  `).all(batchSize);
+  if (missing.length === 0) return 0;
+  let embedded = 0;
+  for (const entity of missing) {
+    try {
+      const props = JSON.parse(entity.properties || "{}");
+      const propsText = Object.entries(props).filter(([_, v]) => v && typeof v === "string").map(([k, v]) => `${k}: ${v}`).join(", ");
+      const text = `${entity.name} (${entity.type})${propsText ? ". " + propsText : ""}`;
+      const vector = await generateEmbedding(text, model);
+      storeEmbedding(db, entity.id, vector, model);
+      embedded++;
+    } catch (err) {
+      console.warn(`[memory-graph] Failed to embed entity ${entity.name}:`, err.message);
+      break;
+    }
+  }
+  return embedded;
+}
+
+// src/extract/relation-dedup.ts
+function dedupRelations(db) {
+  const result = { normalized: 0, removed: 0, mergedRelations: [] };
+  const allRels = db.prepare(`SELECT * FROM relationships`).all();
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const toDelete = [];
+  const toUpdate = [];
+  const groups = /* @__PURE__ */ new Map();
+  for (const rel of allRels) {
+    const canonical = getCanonicalRelation(rel.relation);
+    if (isVagueRelation(rel.relation)) {
+      toDelete.push(rel.id);
+      result.removed++;
+      continue;
+    }
+    if (canonical !== rel.relation) {
+      toUpdate.push({ id: rel.id, relation: canonical });
+      result.normalized++;
+    }
+    const key = `${rel.from_id}|${rel.to_id}|${canonical}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ ...rel, canonical });
+  }
+  if (toDelete.length > 0) {
+    const deleteStmt = db.prepare(`DELETE FROM relationships WHERE id = ?`);
+    for (const id of toDelete) {
+      deleteStmt.run(id);
+    }
+  }
+  if (toUpdate.length > 0) {
+    const updateStmt = db.prepare(`UPDATE relationships SET relation = ?, updated_at = ? WHERE id = ?`);
+    for (const { id, relation } of toUpdate) {
+      updateStmt.run(relation, now, id);
+    }
+  }
+  for (const [key, rels] of groups) {
+    if (rels.length <= 1) continue;
+    rels.sort((a, b) => {
+      if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+      return b.updated_at > a.updated_at ? 1 : -1;
+    });
+    const keep = rels[0];
+    const duplicates = rels.slice(1);
+    for (const dup of duplicates) {
+      db.prepare(`DELETE FROM relationships WHERE id = ?`).run(dup.id);
+      result.removed++;
+    }
+    const boostedConfidence = Math.min(1, keep.confidence + duplicates.length * 0.05);
+    db.prepare(`UPDATE relationships SET confidence = ?, updated_at = ? WHERE id = ?`).run(boostedConfidence, now, keep.id);
+    result.mergedRelations.push({
+      from: key.split("|")[0],
+      to: key.split("|")[1],
+      count: duplicates.length
+    });
+  }
+  return result;
+}
 
 // plugin/entry.ts
 if (!process.env.OPENAI_API_KEY) {
@@ -6335,6 +6521,67 @@ Created: ${params.entity} -[${params.relation}]-> ${params.newTarget} (confidenc
           content: [{
             type: "text",
             text: `Decay applied. Entities affected: ${result.entitiesDecayed}, Relationships affected: ${result.relsDecayed}`
+          }]
+        };
+      }
+    });
+    api.registerTool({
+      name: "memory_graph_semantic_search",
+      description: "Semantic/vector search for entities similar to a query. Uses embeddings for meaning-based matching (not just keywords). Requires embeddings to be generated first.",
+      parameters: Type.Object({
+        query: Type.String({ description: "Search query (natural language)" }),
+        limit: Type.Optional(Type.Number({ description: "Max results (default 10)" }))
+      }),
+      async execute(_id, params, ctx) {
+        const graph = await getGraph(ctx?.pluginConfig);
+        const db = graph.getDb();
+        const results = await semanticSearch(db, params.query, { limit: params.limit || 10 });
+        if (results.length === 0) {
+          return { content: [{ type: "text", text: `No semantic matches for "${params.query}". Run memory_graph_embed to generate embeddings first.` }] };
+        }
+        const text = results.map(
+          (r) => `${r.entity_name} (${r.entity_type}) [similarity: ${(r.similarity * 100).toFixed(1)}%]`
+        ).join("\n");
+        return { content: [{ type: "text", text }] };
+      }
+    });
+    api.registerTool({
+      name: "memory_graph_embed",
+      description: "Generate embeddings for entities that don't have them yet. Required for semantic search. Processes in batches.",
+      parameters: Type.Object({
+        batchSize: Type.Optional(Type.Number({ description: "Entities to embed per call (default 20)" }))
+      }),
+      async execute(_id, params, ctx) {
+        const graph = await getGraph(ctx?.pluginConfig);
+        const db = graph.getDb();
+        const config = ctx?.pluginConfig;
+        const model = config?.embeddingModel || "text-embedding-3-small";
+        const count = await embedMissingEntities(db, { model, batchSize: params.batchSize || 20 });
+        return {
+          content: [{
+            type: "text",
+            text: count > 0 ? `Embedded ${count} entities. Run again if more remain.` : `All entities already have embeddings.`
+          }]
+        };
+      }
+    });
+    api.registerTool({
+      name: "memory_graph_dedup_relations",
+      description: "Clean up the knowledge graph by normalizing relation types (synonyms \u2192 canonical form), removing vague relations, and merging duplicates. Run once after upgrade to v0.7.0.",
+      parameters: Type.Object({}),
+      async execute(_id, _params, ctx) {
+        const graph = await getGraph(ctx?.pluginConfig);
+        const db = graph.getDb();
+        const result = dedupRelations(db);
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `Relations normalized: ${result.normalized}`,
+              `Relations removed (vague/duplicate): ${result.removed}`,
+              `Merge groups: ${result.mergedRelations.length}`,
+              result.mergedRelations.length > 0 ? `Top merges: ${result.mergedRelations.slice(0, 5).map((m) => `${m.count} duplicates`).join(", ")}` : ""
+            ].filter(Boolean).join("\n")
           }]
         };
       }

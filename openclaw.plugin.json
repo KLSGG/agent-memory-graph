@@ -11,7 +11,10 @@
       "memory_graph_stats",
       "memory_graph_temporal",
       "memory_graph_supersede",
-      "memory_graph_decay"
+      "memory_graph_decay",
+      "memory_graph_semantic_search",
+      "memory_graph_embed",
+      "memory_graph_dedup_relations"
     ]
   },
   "activation": {
@@ -87,7 +90,7 @@
     "openclawVersion": ">=2026.3.24",
     "entry": "dist/plugin/entry.js"
   },
-  "version": "0.6.0",
+  "version": "0.7.0",
   "author": "KLSGG",
   "repository": "https://github.com/KLSGG/agent-memory-graph",
   "license": "MIT",

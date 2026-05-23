@@ -1,3 +1,4 @@
+import Database from 'better-sqlite3';
 export interface Entity {
     id: string;
     name: string;
@@ -37,7 +38,7 @@ export interface GraphStats {
     staleEntities?: number;
 }
 export declare class GraphEngine {
-    private db;
+    db: Database.Database;
     constructor(dbPath: string);
     addEntity(name: string, type: string, properties?: Record<string, unknown>, options?: {
         source?: string;

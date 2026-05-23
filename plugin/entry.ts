@@ -2,6 +2,8 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { MemoryGraph } from "../src/index.js";
+import { semanticSearch, embedMissingEntities } from "../src/search/semantic.js";
+import { dedupRelations } from "../src/extract/relation-dedup.js";
 
 // LLM provider env: user can set OPENAI_API_KEY + OPENAI_BASE_URL for any OpenAI-compatible provider.
 // Defaults to local 9router if nothing is set (works out of the box for OpenClaw users with 9router).
@@ -684,6 +686,85 @@ export default definePluginEntry({
           content: [{
             type: "text",
             text: `Decay applied. Entities affected: ${result.entitiesDecayed}, Relationships affected: ${result.relsDecayed}`,
+          }],
+        };
+      },
+    });
+
+    // ─── Tool: Semantic Search ─────────────────────────────────
+    api.registerTool({
+      name: "memory_graph_semantic_search",
+      description:
+        "Semantic/vector search for entities similar to a query. Uses embeddings for meaning-based matching (not just keywords). Requires embeddings to be generated first.",
+      parameters: Type.Object({
+        query: Type.String({ description: "Search query (natural language)" }),
+        limit: Type.Optional(Type.Number({ description: "Max results (default 10)" })),
+      }),
+      async execute(_id, params, ctx) {
+        const graph = await getGraph(ctx?.pluginConfig);
+        const db = graph.getDb();
+        const results = await semanticSearch(db, params.query, { limit: params.limit || 10 });
+
+        if (results.length === 0) {
+          return { content: [{ type: "text", text: `No semantic matches for "${params.query}". Run memory_graph_embed to generate embeddings first.` }] };
+        }
+
+        const text = results.map(r =>
+          `${r.entity_name} (${r.entity_type}) [similarity: ${(r.similarity * 100).toFixed(1)}%]`
+        ).join('\n');
+
+        return { content: [{ type: "text", text }] };
+      },
+    });
+
+    // ─── Tool: Embed Entities ──────────────────────────────────
+    api.registerTool({
+      name: "memory_graph_embed",
+      description:
+        "Generate embeddings for entities that don't have them yet. Required for semantic search. Processes in batches.",
+      parameters: Type.Object({
+        batchSize: Type.Optional(Type.Number({ description: "Entities to embed per call (default 20)" })),
+      }),
+      async execute(_id, params, ctx) {
+        const graph = await getGraph(ctx?.pluginConfig);
+        const db = graph.getDb();
+        const config = ctx?.pluginConfig;
+        const model = config?.embeddingModel || 'text-embedding-3-small';
+        const count = await embedMissingEntities(db, { model, batchSize: params.batchSize || 20 });
+
+        return {
+          content: [{
+            type: "text",
+            text: count > 0
+              ? `Embedded ${count} entities. Run again if more remain.`
+              : `All entities already have embeddings.`,
+          }],
+        };
+      },
+    });
+
+    // ─── Tool: Relation Dedup ──────────────────────────────────
+    api.registerTool({
+      name: "memory_graph_dedup_relations",
+      description:
+        "Clean up the knowledge graph by normalizing relation types (synonyms → canonical form), removing vague relations, and merging duplicates. Run once after upgrade to v0.7.0.",
+      parameters: Type.Object({}),
+      async execute(_id, _params, ctx) {
+        const graph = await getGraph(ctx?.pluginConfig);
+        const db = graph.getDb();
+        const result = dedupRelations(db);
+
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `Relations normalized: ${result.normalized}`,
+              `Relations removed (vague/duplicate): ${result.removed}`,
+              `Merge groups: ${result.mergedRelations.length}`,
+              result.mergedRelations.length > 0
+                ? `Top merges: ${result.mergedRelations.slice(0, 5).map(m => `${m.count} duplicates`).join(', ')}`
+                : '',
+            ].filter(Boolean).join('\n'),
           }],
         };
       },

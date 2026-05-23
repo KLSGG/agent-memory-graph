@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA_SQL = `
 -- Schema version tracking
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS entities (
   confidence REAL DEFAULT 1.0,
   mention_count INTEGER DEFAULT 1,
   lifecycle TEXT DEFAULT 'active',
-  last_accessed TEXT DEFAULT (datetime('now'))
+  last_accessed TEXT
 );
 
 -- Relationships (graph edges)
@@ -37,9 +37,18 @@ CREATE TABLE IF NOT EXISTS relationships (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   source TEXT,
   confidence REAL DEFAULT 1.0,
-  valid_from TEXT DEFAULT (datetime('now')),
+  valid_from TEXT,
   valid_until TEXT,
   lifecycle TEXT DEFAULT 'active'
+);
+
+-- Embeddings for semantic search
+CREATE TABLE IF NOT EXISTS embeddings (
+  id TEXT PRIMARY KEY,
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  vector TEXT NOT NULL,
+  model TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Memory log (audit trail of extractions)
@@ -136,6 +145,19 @@ export class SchemaManager {
         this.db.exec(`CREATE INDEX IF NOT EXISTS idx_rel_lifecycle ON relationships(lifecycle)`);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_lifecycle ON entities(lifecycle)`);
       } catch (_) { /* indexes already exist */ }
+    }
+    if (currentVersion < 4) {
+      // v3 → v4: Add embeddings table for semantic search
+      try {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS embeddings (
+          id TEXT PRIMARY KEY,
+          entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+          vector TEXT NOT NULL,
+          model TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_embeddings_entity ON embeddings(entity_id)`);
+      } catch (_) { /* table already exists */ }
     }
 
     // Set schema version
