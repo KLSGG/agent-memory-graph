@@ -2,6 +2,24 @@
 
 All notable changes to `agent-memory-graph` will be documented in this file.
 
+## [0.5.0] - 2026-05-23
+
+### Added
+- **Temporal validity** (Graphiti-inspired) — relationships now have `valid_from` and `valid_until` timestamps. Facts are never deleted, only invalidated when superseded by newer information.
+- **Fact supersession** — `supersedeRelation()` method and `memory_graph_supersede` tool: update a fact by marking the old one invalid and creating a new one. Full history preserved.
+- **Temporal queries** — `getRelationsAtTime()` method and `memory_graph_temporal` tool: query what was true at any point in time.
+- **Confidence decay** (agentmemory-inspired) — `applyConfidenceDecay()` method and `memory_graph_decay` tool: older, unaccessed entities/relationships gradually lose confidence. Keeps the graph fresh.
+- **Lifecycle states** — entities and relationships now have `lifecycle` field: `active`, `stale`, or `superseded`. Stale items are auto-detected during decay.
+- **Access tracking** — `last_accessed` field on entities, updated via `touchEntity()`. Used by decay algorithm to preserve frequently-accessed knowledge.
+- **Active-only queries** — `getActiveRelationsFrom()` returns only non-superseded, non-stale relationships. Default behavior for `getRelationsFrom/To` now filters out superseded facts.
+- **Enhanced stats** — `memory_graph_stats` now reports active vs superseded relationships and stale entity count.
+- Schema migration v2→v3 (automatic, non-destructive).
+
+### Changed
+- `getRelationsFrom` / `getRelationsTo` now default to active-only; pass `includeSuperseded=true` for full history.
+- `addRelation` now stores `valid_from`, `valid_until`, and `lifecycle` fields.
+- Stats include temporal breakdown.
+
 ## [0.4.1] - 2026-05-23
 
 ### Fixed

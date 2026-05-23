@@ -8,6 +8,8 @@ export interface Entity {
     source?: string;
     confidence: number;
     mention_count?: number;
+    lifecycle?: string;
+    last_accessed?: string;
 }
 export interface Relationship {
     id: string;
@@ -19,6 +21,9 @@ export interface Relationship {
     updated_at: string;
     source?: string;
     confidence: number;
+    valid_from?: string;
+    valid_until?: string | null;
+    lifecycle?: string;
 }
 export interface GraphStats {
     entities: number;
@@ -27,6 +32,9 @@ export interface GraphStats {
     relationTypes: string[];
     oldestEntry: string | null;
     newestEntry: string | null;
+    activeRelationships?: number;
+    supersededRelationships?: number;
+    staleEntities?: number;
 }
 export declare class GraphEngine {
     private db;
@@ -57,12 +65,58 @@ export declare class GraphEngine {
         confidence?: number;
         fromType?: string;
         toType?: string;
+        validFrom?: string;
     }): Relationship;
-    getRelationsFrom(entityId: string): (Relationship & {
+    /**
+     * Invalidate a relationship (set valid_until, mark as superseded).
+     * Graphiti-inspired: facts are never deleted, only invalidated.
+     */
+    invalidateRelation(id: string, reason?: string): boolean;
+    /**
+     * Supersede: invalidate old fact and create new one.
+     * E.g., "Alice works at Google" supersedes "Alice works at Meta"
+     */
+    supersedeRelation(fromName: string, relation: string, oldToName: string, newToName: string, options?: {
+        source?: string;
+        confidence?: number;
+        fromType?: string;
+        toType?: string;
+    }): {
+        invalidated: Relationship | null;
+        created: Relationship;
+    };
+    /**
+     * Apply confidence decay to all entities and relationships.
+     * Older items lose confidence over time. Called periodically.
+     */
+    applyConfidenceDecay(decayRate?: number, minConfidence?: number): {
+        entitiesDecayed: number;
+        relsDecayed: number;
+    };
+    /**
+     * Get relationships valid at a specific point in time.
+     * Graphiti-inspired temporal query.
+     */
+    getRelationsAtTime(entityName: string, atTime: string): (Relationship & {
         to_name: string;
         to_type: string;
     })[];
-    getRelationsTo(entityId: string): (Relationship & {
+    /**
+     * Get only active (non-invalidated) relations from an entity.
+     */
+    getActiveRelationsFrom(entityId: string): (Relationship & {
+        to_name: string;
+        to_type: string;
+    })[];
+    /**
+     * Touch entity (update last_accessed for decay tracking)
+     */
+    touchEntity(id: string): void;
+    getRelationsFrom(entityId: string, includeSuperseded?: boolean): (Relationship & {
+        to_name: string;
+        to_type: string;
+    })[];
+    getRelationsTo(entityId: string, includeSuperseded?: boolean): (Relationship & {
         from_name: string;
         from_type: string;
     })[];

@@ -1,163 +1,64 @@
 # agent-memory-graph
 
-Build and query knowledge graphs from conversation memory. Zero-config, local-first, domain-agnostic.
+Auto-builds a temporal knowledge graph from conversations. Extracts entities and relationships, tracks fact validity over time, and exposes graph query tools to the agent.
 
-## When to use this skill
+## Features
 
-- User mentions entities (people, projects, tools, places, concepts) in conversation
-- User asks relationship questions: "What am I working on?", "Who knows about X?", "How is A connected to B?"
-- User asks multi-hop questions requiring traversal: "What tools does my team use?"
-- User wants to visualize their knowledge/memory connections
-- User wants to import existing memory (MEMORY.md, notes) into a queryable graph
+- **Auto-ingest**: Extracts entities/relationships from every meaningful message
+- **Session summary**: Summarizes key actions at end of each session and ingests into graph
+- **Prompt injection**: Automatically injects relevant graph context into agent prompts
+- **Temporal validity** (Graphiti-inspired): Facts have valid_from/valid_until timestamps. Old facts are superseded, never deleted.
+- **Confidence decay** (agentmemory-inspired): Older, unaccessed knowledge gradually loses confidence. Keeps the graph fresh.
+- **Lifecycle states**: Entities/relationships are `active`, `stale`, or `superseded`
 
-## How it works
+## Tools
 
-1. **Auto-extraction**: When enabled, the skill extracts entities and relationships from conversation text using any LLM provider
-2. **Graph storage**: Entities and relationships are stored in a local SQLite database (single file, zero setup)
-3. **Natural language query**: User asks questions in plain language → skill translates to graph traversal → returns answer
-4. **Visualization**: Export graph as Mermaid diagrams, JSON, or interactive HTML
-
-## Installation
-
-```bash
-cd ~/.openclaw/workspace/skills/agent-memory-graph
-npm install
-npm run build
-```
-
-No external database required. Everything runs in a single SQLite file.
-
-## Commands
-
-### Ingest text (extract entities + relationships)
-
-```
-memory-graph ingest "Alice and Bob are working on Project Atlas using Rust and PostgreSQL"
-```
-
-### Ask a question (natural language → graph query)
-
-```
-memory-graph ask "What projects is Alice working on?"
-memory-graph ask "What technologies does Project Atlas use?"
-memory-graph ask "How is Alice connected to PostgreSQL?"
-```
-
-### Search entities
-
-```
-memory-graph search "Alice"
-memory-graph search --type Person
-memory-graph search --relation WORKS_ON
-```
-
-### Add entities/relationships manually
-
-```
-memory-graph add entity "Docker" Tool
-memory-graph add relation "Project Atlas" DEPLOYED_WITH "Docker"
-```
-
-### Visualize
-
-```
-memory-graph visualize
-memory-graph visualize --format mermaid
-memory-graph visualize --format json
-```
-
-### Import from existing memory
-
-```
-memory-graph sync --source ./MEMORY.md
-memory-graph sync --source ./notes/
-```
-
-### Stats
-
-```
-memory-graph stats
-```
+| Tool | Description |
+|------|-------------|
+| `memory_graph_query` | Natural language question against the graph |
+| `memory_graph_ingest` | Manually extract and store entities from text |
+| `memory_graph_search` | Search entities by keyword or type |
+| `memory_graph_path` | Find shortest path between two entities |
+| `memory_graph_stats` | Graph statistics with temporal breakdown |
+| `memory_graph_temporal` | Query facts valid at a specific point in time |
+| `memory_graph_supersede` | Update a fact by superseding the old one |
+| `memory_graph_decay` | Apply confidence decay to stale knowledge |
 
 ## Configuration
 
-Optional. The skill works with zero configuration. Create `config/graph.config.json` to customize:
-
 ```json
 {
-  "storage": {
-    "path": "./memory-graph.db"
-  },
-  "extraction": {
-    "provider": "auto",
-    "model": "auto",
-    "autoExtract": true,
-    "minConfidence": 0.7
-  },
-  "domains": [],
-  "query": {
-    "maxHops": 3,
-    "maxResults": 10
+  "plugins": {
+    "entries": {
+      "memory-graph": {
+        "enabled": true,
+        "config": {
+          "dbPath": "~/.openclaw/data/memory-graph.db",
+          "autoIngest": true,
+          "sessionSummary": true,
+          "promptInjection": true,
+          "extractionModel": "kr/claude-haiku-4.5",
+          "minConfidence": 0.7,
+          "maxHops": 3
+        },
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      }
+    }
   }
 }
 ```
 
-### Domain hints (optional)
+## Architecture
 
-Add domain hints to improve extraction accuracy for your use case:
+- **Storage**: SQLite (local-first, zero external dependencies)
+- **Extraction**: LLM-powered entity/relationship extraction via OpenAI-compatible API
+- **Search**: Hybrid (FTS5 full-text + LIKE fallback + graph traversal)
+- **Temporal**: Validity windows on relationships, confidence decay on entities
+- **Hooks**: `message_received` (auto-ingest), `agent_end` (session summary), `before_prompt_build` (context injection)
 
-```json
-{
-  "domains": [
-    {
-      "name": "software",
-      "entityHints": ["Person", "Repository", "Language", "Framework", "Service"],
-      "relationHints": ["MAINTAINS", "USES", "DEPENDS_ON", "DEPLOYS_TO"]
-    }
-  ]
-}
-```
+## Inspired By
 
-Without domains, the LLM auto-detects entity types from context.
-
-## Integration
-
-### With OpenClaw agents
-
-The skill is triggered when the agent detects:
-- Entity mentions in conversation (auto-extract mode)
-- Relationship questions from the user
-- Explicit memory-graph commands
-
-### With NeuralMemory
-
-If NeuralMemory is available, the skill can sync extracted entities bidirectionally.
-
-### With MEMORY.md
-
-Import existing markdown memory files to bootstrap the graph.
-
-## Examples
-
-See `examples/` for domain-specific usage:
-- `basic-usage.md` — Getting started
-- `software-project.md` — Track code projects and team
-- `personal-crm.md` — Track contacts and interactions
-- `research-notes.md` — Connect research topics and papers
-- `team-knowledge.md` — Map team expertise and ownership
-
-## Troubleshooting
-
-### No entities extracted
-- Check that an LLM provider is configured (OPENAI_API_KEY or ANTHROPIC_API_KEY)
-- Try lowering `minConfidence` in config
-- Ensure text contains meaningful entities (not just greetings)
-
-### Duplicate entities
-- Run `memory-graph deduplicate` to merge similar entities
-- Adjust `deduplication.similarityThreshold` in config
-
-### Query returns no results
-- Check `memory-graph stats` to verify graph has data
-- Try broader search terms
-- Increase `query.maxHops` for multi-hop questions
+- **Graphiti/Zep**: Temporal context graphs, fact validity windows, provenance tracking
+- **agentmemory**: Confidence scoring, lifecycle management, hybrid search

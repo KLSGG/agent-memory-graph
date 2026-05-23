@@ -218,6 +218,13 @@ export class MemoryGraph {
   }
 
   /**
+   * Get the underlying graph engine (for advanced temporal/lifecycle operations).
+   */
+  getEngine(): GraphEngine {
+    return this.engine;
+  }
+
+  /**
    * Close database connection.
    */
   close(): void {

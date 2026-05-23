@@ -411,7 +411,7 @@ Relationships (${result.relationships.length}): ${rels}`
     });
     api.registerTool({
       name: "memory_graph_stats",
-      description: "Show knowledge graph statistics: entity count, relationship count, types.",
+      description: "Show knowledge graph statistics: entity count, relationship count, types, temporal/lifecycle info.",
       parameters: Type.Object({}),
       async execute(_id, _params, ctx) {
         const graph = await getGraph(ctx?.pluginConfig);
@@ -421,8 +421,8 @@ Relationships (${result.relationships.length}): ${rels}`
             {
               type: "text",
               text: [
-                `Entities: ${stats.entities}`,
-                `Relationships: ${stats.relationships}`,
+                `Entities: ${stats.entities} (stale: ${stats.staleEntities || 0})`,
+                `Relationships: ${stats.relationships} (active: ${stats.activeRelationships || stats.relationships}, superseded: ${stats.supersededRelationships || 0})`,
                 `Entity types: ${stats.entityTypes.join(", ") || "(none)"}`,
                 `Relation types: ${stats.relationTypes.join(", ") || "(none)"}`,
                 `Oldest: ${stats.oldestEntry || "(empty)"}`,
@@ -430,6 +430,93 @@ Relationships (${result.relationships.length}): ${rels}`
               ].join("\n")
             }
           ]
+        };
+      }
+    });
+    api.registerTool({
+      name: "memory_graph_temporal",
+      description: "Query the knowledge graph at a specific point in time. Shows what facts were true at that moment. Graphiti-inspired temporal awareness.",
+      parameters: Type.Object({
+        entity: Type.String({ description: "Entity name to query" }),
+        at: Type.Optional(Type.String({ description: "ISO timestamp to query at (default: now)" })),
+        includeSuperseded: Type.Optional(Type.Number({ description: "Set to 1 to include invalidated/superseded facts" }))
+      }),
+      async execute(_id, params, ctx) {
+        const graph = await getGraph(ctx?.pluginConfig);
+        const engine = graph.getEngine();
+        const atTime = params.at || (/* @__PURE__ */ new Date()).toISOString();
+        const includeAll = params.includeSuperseded === 1;
+        const entity = engine.findEntityByName(params.entity);
+        if (!entity) {
+          return { content: [{ type: "text", text: `Entity "${params.entity}" not found.` }] };
+        }
+        engine.touchEntity(entity.id);
+        const activeRels = engine.getRelationsAtTime(params.entity, atTime);
+        const lines = activeRels.map(
+          (r) => `\u2192 ${r.relation} ${r.to_name} (confidence: ${(r.confidence * 100).toFixed(0)}%, valid from: ${r.valid_from || "unknown"}${r.valid_until ? ", until: " + r.valid_until : ""})`
+        );
+        let supersededLines = [];
+        if (includeAll) {
+          const allRels = engine.getRelationsFrom(entity.id, true);
+          const superseded = allRels.filter((r) => r.lifecycle === "superseded" || r.valid_until);
+          supersededLines = superseded.map(
+            (r) => `\u2717 ${r.relation} ${r.to_name} (superseded, was valid: ${r.valid_from || "?"} \u2192 ${r.valid_until || "?"})`
+          );
+        }
+        const output = [
+          `Entity: ${entity.name} (${entity.type}) [confidence: ${(entity.confidence * 100).toFixed(0)}%, lifecycle: ${entity.lifecycle || "active"}]`,
+          `Facts at ${atTime}:`,
+          ...lines,
+          ...supersededLines.length > 0 ? ["\nSuperseded facts:", ...supersededLines] : []
+        ];
+        return { content: [{ type: "text", text: lines.length > 0 || supersededLines.length > 0 ? output.join("\n") : `No facts found for "${params.entity}" at ${atTime}.` }] };
+      }
+    });
+    api.registerTool({
+      name: "memory_graph_supersede",
+      description: "Update a fact by superseding the old one. E.g., 'Alice works at Google' supersedes 'Alice works at Meta'. Old fact is preserved but marked invalid. Graphiti-inspired temporal fact management.",
+      parameters: Type.Object({
+        entity: Type.String({ description: "Subject entity name" }),
+        relation: Type.String({ description: "Relationship type" }),
+        oldTarget: Type.String({ description: "Old target entity (being superseded)" }),
+        newTarget: Type.String({ description: "New target entity (current truth)" }),
+        source: Type.Optional(Type.String({ description: "Source label" }))
+      }),
+      async execute(_id, params, ctx) {
+        const graph = await getGraph(ctx?.pluginConfig);
+        const engine = graph.getEngine();
+        const result = engine.supersedeRelation(
+          params.entity,
+          params.relation,
+          params.oldTarget,
+          params.newTarget,
+          { source: params.source || "manual-supersede" }
+        );
+        const invalidatedMsg = result.invalidated ? `Invalidated: ${params.entity} -[${params.relation}]-> ${params.oldTarget}` : `No existing active relation found to invalidate.`;
+        return {
+          content: [{
+            type: "text",
+            text: `${invalidatedMsg}
+Created: ${params.entity} -[${params.relation}]-> ${params.newTarget} (confidence: ${(result.created.confidence * 100).toFixed(0)}%)`
+          }]
+        };
+      }
+    });
+    api.registerTool({
+      name: "memory_graph_decay",
+      description: "Apply confidence decay to stale entities and relationships. Older, unaccessed items lose confidence. Run periodically to keep the graph fresh.",
+      parameters: Type.Object({
+        decayRate: Type.Optional(Type.Number({ description: "Decay amount per cycle (default 0.01)" }))
+      }),
+      async execute(_id, params, ctx) {
+        const graph = await getGraph(ctx?.pluginConfig);
+        const engine = graph.getEngine();
+        const result = engine.applyConfidenceDecay(params.decayRate || 0.01);
+        return {
+          content: [{
+            type: "text",
+            text: `Decay applied. Entities affected: ${result.entitiesDecayed}, Relationships affected: ${result.relsDecayed}`
+          }]
         };
       }
     });

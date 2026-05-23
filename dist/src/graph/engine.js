@@ -87,9 +87,9 @@ export class GraphEngine {
         if (!toEntity) {
             toEntity = this.addEntity(toName, options.toType ?? 'Unknown', {}, { source: options.source });
         }
-        // Check for existing relationship
+        // Check for existing active relationship
         const existing = this.db.prepare(`
-      SELECT * FROM relationships WHERE from_id = ? AND to_id = ? AND relation = ? COLLATE NOCASE LIMIT 1
+      SELECT * FROM relationships WHERE from_id = ? AND to_id = ? AND relation = ? COLLATE NOCASE AND (lifecycle = 'active' OR lifecycle IS NULL) LIMIT 1
     `).get(fromEntity.id, toEntity.id, relation);
         if (existing) {
             // Update confidence/properties
@@ -102,33 +102,136 @@ export class GraphEngine {
         }
         const id = `r-${nanoid(12)}`;
         const now = new Date().toISOString();
+        const validFrom = options.validFrom ?? now;
         this.db.prepare(`
-      INSERT INTO relationships (id, from_id, to_id, relation, properties, created_at, updated_at, source, confidence)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, fromEntity.id, toEntity.id, relation, JSON.stringify(options.properties ?? {}), now, now, options.source ?? null, options.confidence ?? 1.0);
+      INSERT INTO relationships (id, from_id, to_id, relation, properties, created_at, updated_at, source, confidence, valid_from, valid_until, lifecycle)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'active')
+    `).run(id, fromEntity.id, toEntity.id, relation, JSON.stringify(options.properties ?? {}), now, now, options.source ?? null, options.confidence ?? 1.0, validFrom);
         return {
             id, from_id: fromEntity.id, to_id: toEntity.id, relation,
             properties: options.properties ?? {}, created_at: now, updated_at: now,
-            source: options.source, confidence: options.confidence ?? 1.0
+            source: options.source, confidence: options.confidence ?? 1.0,
+            valid_from: validFrom, valid_until: null, lifecycle: 'active'
         };
     }
-    getRelationsFrom(entityId) {
+    /**
+     * Invalidate a relationship (set valid_until, mark as superseded).
+     * Graphiti-inspired: facts are never deleted, only invalidated.
+     */
+    invalidateRelation(id, reason) {
+        const now = new Date().toISOString();
+        const result = this.db.prepare(`
+      UPDATE relationships SET valid_until = ?, lifecycle = 'superseded', updated_at = ?,
+      properties = json_set(COALESCE(properties, '{}'), '$.invalidation_reason', ?)
+      WHERE id = ? AND (lifecycle = 'active' OR lifecycle IS NULL)
+    `).run(now, now, reason ?? 'new_fact', id);
+        return result.changes > 0;
+    }
+    /**
+     * Supersede: invalidate old fact and create new one.
+     * E.g., "Alice works at Google" supersedes "Alice works at Meta"
+     */
+    supersedeRelation(fromName, relation, oldToName, newToName, options = {}) {
+        // Find and invalidate old relationship
+        const fromEntity = this.findEntityByName(fromName);
+        let invalidated = null;
+        if (fromEntity) {
+            const oldToEntity = this.findEntityByName(oldToName);
+            if (oldToEntity) {
+                const oldRel = this.db.prepare(`
+          SELECT * FROM relationships WHERE from_id = ? AND to_id = ? AND relation = ? COLLATE NOCASE AND (lifecycle = 'active' OR lifecycle IS NULL) LIMIT 1
+        `).get(fromEntity.id, oldToEntity.id, relation);
+                if (oldRel) {
+                    this.invalidateRelation(oldRel.id, `superseded_by_${newToName}`);
+                    invalidated = this.rowToRelationship(oldRel);
+                }
+            }
+        }
+        // Create new relationship
+        const created = this.addRelation(fromName, relation, newToName, options);
+        return { invalidated, created };
+    }
+    /**
+     * Apply confidence decay to all entities and relationships.
+     * Older items lose confidence over time. Called periodically.
+     */
+    applyConfidenceDecay(decayRate = 0.01, minConfidence = 0.1) {
+        const now = new Date();
+        // Decay entities not accessed recently (>7 days)
+        const entityResult = this.db.prepare(`
+      UPDATE entities SET confidence = MAX(?, confidence - ?),
+      lifecycle = CASE WHEN confidence - ? < 0.3 THEN 'stale' ELSE lifecycle END
+      WHERE lifecycle = 'active'
+      AND julianday('now') - julianday(COALESCE(last_accessed, updated_at)) > 7
+    `).run(minConfidence, decayRate, decayRate);
+        // Decay active relationships not updated recently (>14 days)
+        const relResult = this.db.prepare(`
+      UPDATE relationships SET confidence = MAX(?, confidence - ?),
+      lifecycle = CASE WHEN confidence - ? < 0.3 THEN 'stale' ELSE lifecycle END
+      WHERE (lifecycle = 'active' OR lifecycle IS NULL)
+      AND valid_until IS NULL
+      AND julianday('now') - julianday(updated_at) > 14
+    `).run(minConfidence, decayRate, decayRate);
+        return { entitiesDecayed: entityResult.changes, relsDecayed: relResult.changes };
+    }
+    /**
+     * Get relationships valid at a specific point in time.
+     * Graphiti-inspired temporal query.
+     */
+    getRelationsAtTime(entityName, atTime) {
+        const entity = this.findEntityByName(entityName);
+        if (!entity)
+            return [];
         const rows = this.db.prepare(`
       SELECT r.*, e.name as to_name, e.type as to_type
       FROM relationships r
       JOIN entities e ON r.to_id = e.id
       WHERE r.from_id = ?
-      ORDER BY r.updated_at DESC
+      AND (r.valid_from IS NULL OR r.valid_from <= ?)
+      AND (r.valid_until IS NULL OR r.valid_until > ?)
+      ORDER BY r.confidence DESC
+    `).all(entity.id, atTime, atTime);
+        return rows.map(r => ({ ...this.rowToRelationship(r), to_name: r.to_name, to_type: r.to_type }));
+    }
+    /**
+     * Get only active (non-invalidated) relations from an entity.
+     */
+    getActiveRelationsFrom(entityId) {
+        const rows = this.db.prepare(`
+      SELECT r.*, e.name as to_name, e.type as to_type
+      FROM relationships r
+      JOIN entities e ON r.to_id = e.id
+      WHERE r.from_id = ? AND (r.lifecycle = 'active' OR r.lifecycle IS NULL) AND r.valid_until IS NULL
+      ORDER BY r.confidence DESC, r.updated_at DESC
     `).all(entityId);
         return rows.map(r => ({ ...this.rowToRelationship(r), to_name: r.to_name, to_type: r.to_type }));
     }
-    getRelationsTo(entityId) {
+    /**
+     * Touch entity (update last_accessed for decay tracking)
+     */
+    touchEntity(id) {
+        const now = new Date().toISOString();
+        this.db.prepare(`UPDATE entities SET last_accessed = ? WHERE id = ?`).run(now, id);
+    }
+    getRelationsFrom(entityId, includeSuperseded = false) {
+        const lifecycleFilter = includeSuperseded ? '' : `AND (r.lifecycle = 'active' OR r.lifecycle IS NULL)`;
+        const rows = this.db.prepare(`
+      SELECT r.*, e.name as to_name, e.type as to_type
+      FROM relationships r
+      JOIN entities e ON r.to_id = e.id
+      WHERE r.from_id = ? ${lifecycleFilter}
+      ORDER BY r.confidence DESC, r.updated_at DESC
+    `).all(entityId);
+        return rows.map(r => ({ ...this.rowToRelationship(r), to_name: r.to_name, to_type: r.to_type }));
+    }
+    getRelationsTo(entityId, includeSuperseded = false) {
+        const lifecycleFilter = includeSuperseded ? '' : `AND (r.lifecycle = 'active' OR r.lifecycle IS NULL)`;
         const rows = this.db.prepare(`
       SELECT r.*, e.name as from_name, e.type as from_type
       FROM relationships r
       JOIN entities e ON r.from_id = e.id
-      WHERE r.to_id = ?
-      ORDER BY r.updated_at DESC
+      WHERE r.to_id = ? ${lifecycleFilter}
+      ORDER BY r.confidence DESC, r.updated_at DESC
     `).all(entityId);
         return rows.map(r => ({ ...this.rowToRelationship(r), from_name: r.from_name, from_type: r.from_type }));
     }
@@ -266,6 +369,16 @@ export class GraphEngine {
             .map(r => r.relation);
         const oldest = this.db.prepare(`SELECT MIN(created_at) as t FROM entities`).get();
         const newest = this.db.prepare(`SELECT MAX(updated_at) as t FROM entities`).get();
+        // Temporal stats
+        let activeRelationships = relCount;
+        let supersededRelationships = 0;
+        let staleEntities = 0;
+        try {
+            activeRelationships = this.db.prepare(`SELECT COUNT(*) as c FROM relationships WHERE (lifecycle = 'active' OR lifecycle IS NULL) AND valid_until IS NULL`).get().c;
+            supersededRelationships = this.db.prepare(`SELECT COUNT(*) as c FROM relationships WHERE lifecycle = 'superseded' OR valid_until IS NOT NULL`).get().c;
+            staleEntities = this.db.prepare(`SELECT COUNT(*) as c FROM entities WHERE lifecycle = 'stale'`).get().c;
+        }
+        catch (_) { /* pre-v3 schema */ }
         return {
             entities: entityCount,
             relationships: relCount,
@@ -273,6 +386,9 @@ export class GraphEngine {
             relationTypes,
             oldestEntry: oldest?.t ?? null,
             newestEntry: newest?.t ?? null,
+            activeRelationships,
+            supersededRelationships,
+            staleEntities,
         };
     }
     // ─── Memory Log ────────────────────────────────────────────────
@@ -295,6 +411,8 @@ export class GraphEngine {
             source: row.source ?? undefined,
             confidence: row.confidence,
             mention_count: row.mention_count ?? 1,
+            lifecycle: row.lifecycle ?? 'active',
+            last_accessed: row.last_accessed ?? undefined,
         };
     }
     rowToRelationship(row) {
@@ -308,6 +426,9 @@ export class GraphEngine {
             updated_at: row.updated_at,
             source: row.source ?? undefined,
             confidence: row.confidence,
+            valid_from: row.valid_from ?? undefined,
+            valid_until: row.valid_until ?? null,
+            lifecycle: row.lifecycle ?? 'active',
         };
     }
     /** Close database */

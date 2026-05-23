@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA_SQL = `
 -- Schema version tracking
@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS entities (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   source TEXT,
   confidence REAL DEFAULT 1.0,
-  mention_count INTEGER DEFAULT 1
+  mention_count INTEGER DEFAULT 1,
+  lifecycle TEXT DEFAULT 'active',
+  last_accessed TEXT DEFAULT (datetime('now'))
 );
 
 -- Relationships (graph edges)
@@ -34,7 +36,10 @@ CREATE TABLE IF NOT EXISTS relationships (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   source TEXT,
-  confidence REAL DEFAULT 1.0
+  confidence REAL DEFAULT 1.0,
+  valid_from TEXT DEFAULT (datetime('now')),
+  valid_until TEXT,
+  lifecycle TEXT DEFAULT 'active'
 );
 
 -- Memory log (audit trail of extractions)
@@ -107,6 +112,30 @@ export class SchemaManager {
       try {
         this.db.exec(`ALTER TABLE entities ADD COLUMN mention_count INTEGER DEFAULT 1`);
       } catch (_) { /* column already exists */ }
+    }
+    if (currentVersion < 3) {
+      // v2 → v3: Add temporal validity + lifecycle
+      try {
+        this.db.exec(`ALTER TABLE relationships ADD COLUMN valid_from TEXT DEFAULT (datetime('now'))`);
+      } catch (_) { /* column already exists */ }
+      try {
+        this.db.exec(`ALTER TABLE relationships ADD COLUMN valid_until TEXT`);
+      } catch (_) { /* column already exists */ }
+      try {
+        this.db.exec(`ALTER TABLE relationships ADD COLUMN lifecycle TEXT DEFAULT 'active'`);
+      } catch (_) { /* column already exists */ }
+      try {
+        this.db.exec(`ALTER TABLE entities ADD COLUMN lifecycle TEXT DEFAULT 'active'`);
+      } catch (_) { /* column already exists */ }
+      try {
+        this.db.exec(`ALTER TABLE entities ADD COLUMN last_accessed TEXT DEFAULT (datetime('now'))`);
+      } catch (_) { /* column already exists */ }
+      // Index for temporal queries
+      try {
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_rel_valid ON relationships(valid_from, valid_until)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_rel_lifecycle ON relationships(lifecycle)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_lifecycle ON entities(lifecycle)`);
+      } catch (_) { /* indexes already exist */ }
     }
 
     // Set schema version

@@ -1,4 +1,4 @@
-import { type Entity, type Relationship, type GraphStats } from './graph/engine.js';
+import { GraphEngine, type Entity, type Relationship, type GraphStats } from './graph/engine.js';
 import { type Config } from './config/defaults.js';
 import { type ExtractionResult } from './extract/extractor.js';
 import { type SearchResult } from './search/hybrid.js';
@@ -117,6 +117,10 @@ export declare class MemoryGraph {
      * Get graph statistics.
      */
     stats(): GraphStats;
+    /**
+     * Get the underlying graph engine (for advanced temporal/lifecycle operations).
+     */
+    getEngine(): GraphEngine;
     /**
      * Close database connection.
      */

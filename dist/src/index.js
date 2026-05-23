@@ -179,6 +179,12 @@ export class MemoryGraph {
         return this.engine.stats();
     }
     /**
+     * Get the underlying graph engine (for advanced temporal/lifecycle operations).
+     */
+    getEngine() {
+        return this.engine;
+    }
+    /**
      * Close database connection.
      */
     close() {
